@@ -1,7 +1,5 @@
 /**
- * lv_conf.h — LVGL 8.3.x per ESP32-S3-WROOM-1
- *
- * Display: 480×272 RGB565 (TST043WQHS-67)
+ * lv_conf.h — LVGL 8.3.x per ESP32-S3-WROOM-1-N4R8
  * POSIZIONE: Documents/Arduino/libraries/lv_conf.h
  */
 
@@ -16,18 +14,15 @@
 #define LV_HOR_RES_MAX    480
 #define LV_VER_RES_MAX    272
 #define LV_COLOR_DEPTH    16
-#define LV_COLOR_16_SWAP  0   /* RGB panel ESP32-S3: NO byte-swap (diverso da ILI9341 SPI) */
+#define LV_COLOR_16_SWAP  0
 
 /*==========================
-   Memoria
-   ESP32-S3 con PSRAM:
-   framebuffer in PSRAM,
-   LVGL heap in SRAM interna
+   Memoria LVGL heap
 ===========================*/
 #define LV_MEM_CUSTOM     0
-#define LV_MEM_SIZE       (64U * 1024U)   /* 64KB SRAM interna per LVGL heap */
+#define LV_MEM_SIZE       (64U * 1024U)
 #define LV_MEM_ADR        0
-//#define LV_MEM_POOL_INCLUDE ""           /* commentato: non usare pool custom */
+//#define LV_MEM_POOL_INCLUDE ""
 #define LV_MEM_POOL_ALLOC  lv_mem_alloc
 #define LV_MEM_POOL_FREE   lv_mem_free
 
@@ -39,6 +34,20 @@
 
 /*==========================
    Font Montserrat
+   Analisi utilizzo nel codice:
+     10  → label ±5°C (ui.cpp)
+     12  → PID%, status, splash
+     14  → DEFAULT — usato ovunque
+     16  → header panel, °C, WiFi
+     18  → header WiFi/OTA, ricette
+     20  → NON USATO → 0
+     22  → setpoint arco CTRL (TempSetBase/Cielo) → 1 ← era 0, FIX
+     24  → NON USATO → 0
+     26  → NON USATO → già 0
+     28  → bottoni ± (make_pm) → 1 ← portato a 1, FIX
+     32  → Kp/Ki/Kd label PID → 1 ← era 0, FIX
+     36  → splash titolo
+     48  → temperatura MAIN
 ===========================*/
 #define LV_FONT_MONTSERRAT_8   0
 #define LV_FONT_MONTSERRAT_10  1
@@ -46,21 +55,21 @@
 #define LV_FONT_MONTSERRAT_14  1
 #define LV_FONT_MONTSERRAT_16  1
 #define LV_FONT_MONTSERRAT_18  1
-#define LV_FONT_MONTSERRAT_20  1
-#define LV_FONT_MONTSERRAT_22  0
-#define LV_FONT_MONTSERRAT_24  1
+#define LV_FONT_MONTSERRAT_20  0   /* non usato */
+#define LV_FONT_MONTSERRAT_22  1   /* FIX: setpoint arco CTRL */
+#define LV_FONT_MONTSERRAT_24  0   /* non usato */
 #define LV_FONT_MONTSERRAT_26  0
-#define LV_FONT_MONTSERRAT_28  1
+#define LV_FONT_MONTSERRAT_28  1   /* FIX: bottoni ± make_pm in ui.cpp */
 #define LV_FONT_MONTSERRAT_30  0
-#define LV_FONT_MONTSERRAT_32  0
+#define LV_FONT_MONTSERRAT_32  1   /* FIX: Kp/Ki/Kd schermate PID */
 #define LV_FONT_MONTSERRAT_34  0
-#define LV_FONT_MONTSERRAT_36  1
+#define LV_FONT_MONTSERRAT_36  1   /* splash titolo */
 #define LV_FONT_MONTSERRAT_38  0
 #define LV_FONT_MONTSERRAT_40  0
 #define LV_FONT_MONTSERRAT_42  0
 #define LV_FONT_MONTSERRAT_44  0
 #define LV_FONT_MONTSERRAT_46  0
-#define LV_FONT_MONTSERRAT_48  1
+#define LV_FONT_MONTSERRAT_48  1   /* temperatura MAIN */
 #define LV_FONT_DEFAULT        &lv_font_montserrat_14
 
 #define LV_FONT_UNSCII_8       0
@@ -132,7 +141,7 @@
 #define LV_TXT_ENC            LV_TXT_ENC_UTF8
 #define LV_TXT_BREAK_CHARS    " ,.;:-_"
 #define LV_TXT_LINE_BREAK_LONG_LEN 0
-#define LV_TXT_COLOR_CMD      "#"    /* virgolette DOPPIE obbligatorie (const char*, non char) */
+#define LV_TXT_COLOR_CMD      "#"
 #define LV_USE_BIDI           0
 #define LV_USE_ARABIC_PERSIAN_CHARS 0
 

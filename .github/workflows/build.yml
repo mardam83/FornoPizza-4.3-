@@ -40,26 +40,17 @@ jobs:
             --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
 
       # ── 5. Installa librerie ──────────────────────────────────────
-      # Nomi esatti da Arduino Library Manager, verificati sugli #include del progetto:
-      #   max6675.h        -> "MAX6675 library"  (by Rob Tillaart)
-      #   PID_v1.h         -> "PID"              (by Brett Beauregard)
-      #   PID_AutoTune_v0  -> "PID_AutoTune_v0"  (by Brett Beauregard)
-      #   PubSubClient.h   -> "PubSubClient"     (by Nick O'Leary)
-      #   ArduinoJson.h    -> "ArduinoJson"      (by Benoit Blanchon)
       - name: Install libraries
         run: |
           arduino-cli lib install \
+            "LovyanGFX" \
             "lvgl@8.3.11" \
-            "TFT_eSPI" \
-            "XPT2046_Touchscreen" \
             "MAX6675 library" \
             "PID" \
             "PubSubClient" \
             "ArduinoJson"
 
       # ── 6. Patch lv_conf.h — ERRORI NOTI ─────────────────────────
-      # - #define LV_MEM_POOL_INCLUDE ""  -> va COMMENTATA (errore compiler)
-      # - #define LV_TXT_COLOR_CMD "#"    -> virgolette DOPPIE, non singole
       - name: Patch lv_conf.h (errori noti LVGL)
         run: |
           LV_CONF=$(find ~/.arduino15 ~/Arduino/libraries -name "lv_conf.h" 2>/dev/null | head -1)
@@ -73,8 +64,6 @@ jobs:
           fi
 
       # ── 7. Usa lv_conf.h del progetto (se presente nella repo) ───
-      # Il lv_conf.h del progetto ha gia LV_MEM_POOL_INCLUDE commentata
-      # e LV_TXT_COLOR_CMD con virgolette doppie -- sovrascrive quello LVGL
       - name: Use project lv_conf.h (if present)
         run: |
           if [ -f "lv_conf.h" ]; then
@@ -85,42 +74,31 @@ jobs:
             fi
           fi
 
-      # ── 8. Usa User_Setup.h del progetto per TFT_eSPI ────────────
-      - name: Use project User_Setup.h (if present)
-        run: |
-          if [ -f "User_Setup.h" ]; then
-            TFT_DIR=$(find ~/.arduino15 ~/Arduino/libraries -maxdepth 3 -name "TFT_eSPI" -type d 2>/dev/null | head -1)
-            if [ -n "$TFT_DIR" ]; then
-              cp User_Setup.h "$TFT_DIR/User_Setup.h"
-              echo "User_Setup.h copiato in: $TFT_DIR"
-            fi
-          fi
-
-      # ── 9. Compila ────────────────────────────────────────────────
-      # Impostazioni board da Arduino IDE (screenshot):
-      #   CPU Frequency:    240MHz (WiFi/BT)
-      #   Flash Frequency:  80MHz
-      #   Flash Mode:       QIO
-      #   Flash Size:       4MB (32Mb)
-      #   Partition:        Minimal SPIFFS (1.9MB APP with OTA / 128KB SPIFFS)
-      #   PSRAM:            Disabled
-      #   Events Run On:    Core 1
-      #   Arduino Runs On:  Core 1
+      # ── 8. Compila ────────────────────────────────────────────────
+      # Impostazioni board (ESP32-S3-WROOM-1-N4R8):
+      #   CPU Frequency:    240 MHz (WiFi/BT)
+      #   Flash Frequency:  80 MHz QIO 4 MB
+      #   Partition:        Minimal SPIFFS (1.9 MB APP + OTA / 128 KB SPIFFS)
+      #   PSRAM:            OPI PSRAM  ← N4R8 usa PSRAM OPI (8 MB)
+      #   Events / Arduino: Core 1
+      #
+      # NOTA: su N4R8 la PSRAM è OPI (Octal SPI) — i GPIO 33-37 sono
+      # riservati internamente dal bus OPI e NON devono essere usati.
       - name: Compile sketch
         run: |
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32:CPUFreq=240,FlashFreq=80,FlashMode=qio,FlashSize=4M,PartitionScheme=min_spiffs,PSRAM=disabled,EventsCore=1" \
+            --fqbn "esp32:esp32:esp32s3:CPUFreq=240,FlashFreq=80,FlashMode=qio,FlashSize=4M,PartitionScheme=min_spiffs,PSRAM=opi,EventsCore=1,ArduinoCore=1" \
             --output-dir ./build \
             --warnings default \
             .
 
-      # ── 10. Mostra dimensione binari ──────────────────────────────
+      # ── 9. Mostra dimensione binari ──────────────────────────────
       - name: Show firmware size
         run: |
           echo "=== Firmware generati ==="
           ls -lh ./build/*.bin 2>/dev/null || echo "Nessun .bin trovato"
 
-      # ── 11. Upload artifact ───────────────────────────────────────
+      # ── 10. Upload artifact ──────────────────────────────────────
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
@@ -131,7 +109,7 @@ jobs:
           retention-days: 30
 
   # ════════════════════════════════════════════════════════════════
-  #  RELEASE -- si attiva solo su tag tipo: git tag v1.0 && git push --tags
+  #  RELEASE -- si attiva solo su tag: git tag v1.0 && git push --tags
   # ════════════════════════════════════════════════════════════════
   release:
     name: Create GitHub Release
@@ -167,19 +145,21 @@ jobs:
 
             ### Flash iniziale via USB
             ```bash
-            esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
+            esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
               write_flash -z 0x10000 FornoPizza_${{ github.ref_name }}_*.bin
             ```
 
             ### Aggiornamento OTA
-            Usa l'interfaccia web integrata del forno (WiFi -> OTA Update).
+            Usa l'interfaccia web integrata del forno (WiFi → OTA Update).
 
             | Parametro | Valore |
             |---|---|
+            | MCU | ESP32-S3-WROOM-1-N4R8 |
             | CPU | 240 MHz (WiFi/BT) |
             | Flash | 80 MHz QIO 4 MB |
-            | Partition | Minimal SPIFFS - 1.9 MB APP + OTA + 128 KB SPIFFS |
-            | PSRAM | Disabled |
+            | Partition | Minimal SPIFFS — 1.9 MB APP + OTA + 128 KB SPIFFS |
+            | PSRAM | OPI 8 MB |
+            | Display buffer | Double full framebuffer PSRAM (2 × 255 KB) + DMA SPI |
             | Events / Arduino | Core 1 |
           files: ./release/*.bin
           draft: false
