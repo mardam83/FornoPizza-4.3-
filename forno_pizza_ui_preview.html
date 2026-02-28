@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>FornoPizza S3 — UI Preview 480×272</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#1a1a2e; font-family:'Segoe UI',sans-serif; color:#ccc;
+       display:flex; flex-direction:column; align-items:center; padding:20px; gap:16px; }
+h1 { color:#00E676; font-size:18px; letter-spacing:1px; }
+.outer { display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
+.sim { background:#111; border:1px solid #333; border-radius:8px; padding:12px; width:190px; flex-shrink:0; }
+.sim h3 { color:#aaa; font-size:11px; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; }
+.sim label { display:flex; align-items:center; gap:6px; font-size:11px; color:#888; margin:4px 0; }
+.sim input[type=range] { flex:1; accent-color:#FF6B00; }
+.sim select { background:#1a1a2e; color:#ccc; border:1px solid #444; border-radius:4px;
+              padding:2px 4px; font-size:11px; }
+.tab-bar { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px; }
+.tab { padding:5px 10px; border:1px solid #444; border-radius:4px; cursor:pointer;
+       font-size:11px; background:#0a0a18; color:#888; transition:all .15s; white-space:nowrap; }
+.tab.active { background:#003320; border-color:#00E676; color:#00E676; }
+
+/* ── The display: EXACTLY 480×272, overflow hidden ── */
+.display {
+  width: 480px;
+  height: 272px;
+  position: relative;
+  overflow: hidden;          /* ← this is the key: clips anything beyond 480×272 */
+  background: #0a0a16;
+  border: 2px solid #444;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.screen { position:absolute; inset:0; display:none; }
+.screen.active { display:block; }
+
+/* helpers */
+.abs { position:absolute; }
+.flex-c { display:flex; align-items:center; justify-content:center; }
+.btn { cursor:pointer; border-radius:8px; transition:filter .1s; user-select:none;
+       display:flex; align-items:center; justify-content:center; }
+.btn:active { filter:brightness(1.5); }
+
+/* colour variables */
+:root {
+  --acc: #FF6B00;   /* BASE / accent */
+  --cie: #FF3030;   /* CIELO */
+  --grn: #00E676;   /* green */
+  --yel: #FFD600;   /* yellow / setpoint */
+  --blu: #0080FF;   /* wifi */
+  --vio: #BB44FF;   /* single mode */
+  --tun: #00AAFF;   /* PID tuning */
+  --gry: #606070;
+  --luc: #FFE000;   /* luce */
+  --pan: #141422;   /* panel bg */
+}
+</style>
+</head>
+<body>
+
+<h1>⚙ FornoPizza S3 — UI Preview 480×272</h1>
+
+<div class="outer">
+
+<!-- ═══════════════════ DISPLAY ═══════════════════ -->
+<div>
+  <div class="tab-bar">
+    <div class="tab active" onclick="go('main',this)">MAIN</div>
+    <div class="tab"        onclick="go('ctrl',this)">CTRL</div>
+    <div class="tab"        onclick="go('pid', this)">PID</div>
+    <div class="tab"        onclick="go('grph',this)">GRAFICO</div>
+    <div class="tab"        onclick="go('timr',this)">TIMER</div>
+    <div class="tab"        onclick="go('rice',this)">RICETTE</div>
+    <div class="tab"        onclick="go('wifi',this)">WiFi</div>
+    <div class="tab"        onclick="go('ota', this)">OTA</div>
+  </div>
+
+  <div class="display">
+
+  <!-- ══════════════════════════════════════════════
+       MAIN   480×272
+       NavBar      y=0   h=32  4×120px
+       Panel BASE  y=33  h=180  x=2   w=234
+       Panel CIELO y=33  h=180  x=244 w=234
+       Sep         y=213 h=2
+       ON/OFF bar  y=215 h=33  BASE(156)|CIELO(156)|LUCE(160) — all x+w ≤ 478
+       Status bar  y=249 h=23
+  ══════════════════════════════════════════════ -->
+  <div class="screen active" id="s-main">
+
+    <!-- NavBar y=0 h=32 -->
+    <div class="abs" style="left:0;top:0;width:480px;height:32px;background:#080816;display:flex;">
+      <div class="btn" style="width:120px;height:32px;background:#002212;border-right:1px solid var(--grn);border-radius:0;font-size:12px;color:var(--grn);" onclick="go('ctrl',null)">⚙ CTRL</div>
+      <div class="btn" style="width:120px;height:32px;background:#060604;border-right:1px solid #80FF40;border-radius:0;font-size:12px;color:#80FF40;" onclick="go('grph',null)">📊 GRAFICO</div>
+      <div class="btn" style="width:120px;height:32px;background:#002044;border-right:1px solid var(--blu);border-radius:0;font-size:12px;color:var(--blu);" onclick="go('wifi',null)">📶 WiFi</div>
+      <div class="btn" style="width:120px;height:32px;background:#301400;border-radius:0;font-size:12px;color:var(--acc);" onclick="go('ota',null)">⬆ OTA</div>
+    </div>
+
+    <!-- Panel BASE  x=2 y=33 w=234 h=180 -->
+    <div class="abs" style="left:2px;top:33px;width:234px;height:180px;background:var(--pan);border:2px solid var(--acc);border-radius:10px;overflow:hidden;">
+      <span class="abs" style="left:8px;top:6px;font-size:14px;color:var(--acc);font-weight:bold;">BASE</span>
+      <div class="abs" id="led-base" style="left:56px;top:9px;width:12px;height:12px;border-radius:50%;background:#333;"></div>
+      <!-- temp: LV_ALIGN_CENTER,0,-20 → center=(117,90) offset-20 → cy=70, font48≈56px tall → top=42 -->
+      <div class="abs flex-c" id="mt-base" style="left:0;top:42px;width:234px;height:56px;font-size:46px;font-weight:bold;color:#fff;letter-spacing:-1px;">---</div>
+      <span class="abs" style="right:6px;top:6px;font-size:13px;color:#707090;">°C</span>
+      <!-- PID bar y=138 h=14 -->
+      <div class="abs" style="left:8px;top:138px;width:218px;height:14px;background:#1a1a2e;border-radius:7px;overflow:hidden;">
+        <div id="mb-base" style="height:100%;width:0%;background:var(--acc);border-radius:7px;transition:width .5s;"></div>
+      </div>
+      <span class="abs" id="mp-base" style="left:8px;top:153px;font-size:11px;color:var(--gry);">PID 0%</span>
+    </div>
+
+    <!-- Panel CIELO  x=244 y=33 w=234 h=180 -->
+    <div class="abs" style="left:244px;top:33px;width:234px;height:180px;background:var(--pan);border:2px solid var(--cie);border-radius:10px;overflow:hidden;">
+      <span class="abs" style="left:8px;top:6px;font-size:14px;color:var(--cie);font-weight:bold;">CIELO</span>
+      <div class="abs" id="led-cielo" style="left:66px;top:9px;width:12px;height:12px;border-radius:50%;background:#333;"></div>
+      <div class="abs flex-c" id="mt-cielo" style="left:0;top:42px;width:234px;height:56px;font-size:46px;font-weight:bold;color:#fff;letter-spacing:-1px;">---</div>
+      <span class="abs" style="right:6px;top:6px;font-size:13px;color:#707090;">°C</span>
+      <div class="abs" style="left:8px;top:138px;width:218px;height:14px;background:#1a1a2e;border-radius:7px;overflow:hidden;">
+        <div id="mb-cielo" style="height:100%;width:0%;background:var(--cie);border-radius:7px;transition:width .5s;"></div>
+      </div>
+      <span class="abs" id="mp-cielo" style="left:8px;top:153px;font-size:11px;color:var(--gry);">PID 0%</span>
+    </div>
+
+    <!-- Sep y=213 -->
+    <div class="abs" style="left:0;top:213px;width:480px;height:2px;background:#303048;"></div>
+
+    <!-- ON/OFF bar y=215 h=33: 2+156=158 | 160+156=316 | 318+160=478 ✓ -->
+    <div class="btn abs" id="be-base"  style="left:2px;top:215px;width:156px;height:33px;background:#1a1a2e;border:2px solid var(--gry);font-size:12px;color:var(--gry);" onclick="toggleBase()">BASE OFF</div>
+    <div class="btn abs" id="be-cielo" style="left:160px;top:215px;width:156px;height:33px;background:#1a1a2e;border:2px solid var(--gry);font-size:12px;color:var(--gry);" onclick="toggleCielo()">CIELO OFF</div>
+    <div class="btn abs" id="be-luce"  style="left:318px;top:215px;width:160px;height:33px;background:#1a1a2e;border:2px solid var(--gry);font-size:12px;color:var(--gry);" onclick="toggleLuce()">⚡ LUCE OFF</div>
+
+    <!-- Status bar y=249 h=23 -->
+    <div class="abs" style="left:0;top:249px;width:480px;height:23px;background:#06060E;display:flex;align-items:center;padding:0 6px;">
+      <span id="main-status" style="font-size:11px;color:var(--gry);flex:1;">Sistema pronto</span>
+      <div id="led-fan" style="width:10px;height:10px;border-radius:50%;background:#222;margin-right:4px;"></div>
+      <span style="font-size:11px;color:#404055;">FAN</span>
+    </div>
+
+    <!-- Safety banner (hidden default) -->
+    <div class="abs flex-c" id="main-safety" style="left:0;top:33px;width:480px;height:36px;background:#C00000;display:none;">
+      <span style="font-size:15px;color:#fff;font-weight:bold;">⚠ SHUTDOWN SICUREZZA</span>
+    </div>
+  </div><!-- /MAIN -->
+
+
+  <!-- ══════════════════════════════════════════════
+       CTRL   480×272
+       ON/OFF row  y=1   h=30  BASE(115)|CIELO(115)|LUCE(78)|←MAIN(164)
+                              1+115=116 | 118+115=233 | 235+78=313 | 315+164=479 ✓
+       Panel BASE  y=33  h=150  x=2   w=234
+       Panel CIELO y=33  h=150  x=244 w=234  (244+234=478 ✓)
+       Sep         y=183 h=2
+       Nav         y=185 h=40  RICETTE(158)|TIMER(158)|PID(158)
+                              2+158=160 | 162+158=320 | 322+158=480 ✓
+       Sep         y=225 h=2
+       SINGLE      y=227 h=43  x=2  w=150
+       PanelSplit  y=227 h=43  x=154 w=324  (154+324=478 ✓)
+       bottom=270 ✓
+  ══════════════════════════════════════════════ -->
+  <div class="screen" id="s-ctrl">
+
+    <!-- ON/OFF top row y=1 h=30 -->
+    <div class="btn abs" id="cb-base"  style="left:1px;top:1px;width:115px;height:30px;background:#1a1a2e;border:2px solid var(--gry);border-radius:6px;font-size:11px;color:var(--gry);" onclick="toggleBase()">BASE OFF</div>
+    <div class="btn abs" id="cb-cielo" style="left:118px;top:1px;width:115px;height:30px;background:#1a1a2e;border:2px solid var(--gry);border-radius:6px;font-size:11px;color:var(--gry);" onclick="toggleCielo()">CIELO OFF</div>
+    <div class="btn abs" id="cb-luce"  style="left:235px;top:1px;width:78px;height:30px;background:#1a1a2e;border:2px solid var(--gry);border-radius:6px;font-size:11px;color:var(--gry);" onclick="toggleLuce()">⚡ LUCE</div>
+    <div class="btn abs"               style="left:315px;top:1px;width:164px;height:30px;background:#00200A;border:2px solid var(--grn);border-radius:8px;font-size:12px;color:var(--grn);" onclick="go('main',null)">◀ TORNA MAIN</div>
+
+    <!-- Panel BASE  x=2 y=33 w=234 h=150  pad=6 -->
+    <div class="abs" style="left:2px;top:33px;width:234px;height:150px;background:var(--pan);border:2px solid var(--acc);border-radius:10px;overflow:hidden;padding:6px;">
+      <span style="position:absolute;left:6px;top:4px;font-size:13px;color:var(--acc);font-weight:bold;">BASE</span>
+      <!-- arc SVG 112×112 at internal x=0 y=14 -->
+      <svg style="position:absolute;left:6px;top:20px;" width="112" height="112" viewBox="0 0 112 112">
+        <circle cx="56" cy="56" r="44" fill="none" stroke="#1e1e30" stroke-width="10"/>
+        <circle id="arc-base" cx="56" cy="56" r="44" fill="none" stroke="var(--acc)" stroke-width="10"
+          stroke-dasharray="0 277" stroke-linecap="round" transform="rotate(-220 56 56)"/>
+      </svg>
+      <!-- setpoint centred on arc: arc centre internal=(56,70), label x=0 y=56 w=112 h=28 -->
+      <div class="abs flex-c" id="cs-base" style="left:6px;top:62px;width:112px;height:28px;font-size:20px;font-weight:bold;color:var(--yel);">250°C</div>
+      <!-- buttons: x=114→screen-left=120, y=14→top=20, y=70→top=76 -->
+      <div class="btn abs" style="left:120px;top:20px;width:108px;height:52px;background:#1a1a2e;border:2px solid var(--acc);font-size:28px;color:var(--acc);" onclick="chSet('base',+5)">+</div>
+      <div class="btn abs" style="left:120px;top:76px;width:108px;height:52px;background:#1a1a2e;border:2px solid var(--acc);font-size:28px;color:var(--acc);" onclick="chSet('base',-5)">−</div>
+      <span class="abs" style="right:4px;bottom:18px;font-size:10px;color:var(--gry);">±5°C</span>
+      <!-- PID bar y=128 h=8 → screen top=134 -->
+      <div class="abs" style="left:6px;top:134px;width:222px;height:8px;background:#1a1a2e;border-radius:4px;overflow:hidden;">
+        <div id="cb-bar-base" style="height:100%;width:0%;background:var(--acc);border-radius:4px;transition:width .5s;"></div>
+      </div>
+    </div>
+
+    <!-- Panel CIELO  x=244 y=33 w=234 h=150  244+234=478 ✓ -->
+    <div class="abs" style="left:244px;top:33px;width:234px;height:150px;background:var(--pan);border:2px solid var(--cie);border-radius:10px;overflow:hidden;padding:6px;">
+      <span style="position:absolute;left:6px;top:4px;font-size:13px;color:var(--cie);font-weight:bold;">CIELO</span>
+      <svg style="position:absolute;left:6px;top:20px;" width="112" height="112" viewBox="0 0 112 112">
+        <circle cx="56" cy="56" r="44" fill="none" stroke="#1e1e30" stroke-width="10"/>
+        <circle id="arc-cielo" cx="56" cy="56" r="44" fill="none" stroke="var(--cie)" stroke-width="10"
+          stroke-dasharray="0 277" stroke-linecap="round" transform="rotate(-220 56 56)"/>
+      </svg>
+      <div class="abs flex-c" id="cs-cielo" style="left:6px;top:62px;width:112px;height:28px;font-size:20px;font-weight:bold;color:var(--yel);">300°C</div>
+      <div class="btn abs" style="left:120px;top:20px;width:108px;height:52px;background:#1a1a2e;border:2px solid var(--cie);font-size:28px;color:var(--cie);" onclick="chSet('cielo',+5)">+</div>
+      <div class="btn abs" style="left:120px;top:76px;width:108px;height:52px;background:#1a1a2e;border:2px solid var(--cie);font-size:28px;color:var(--cie);" onclick="chSet('cielo',-5)">−</div>
+      <span class="abs" style="right:4px;bottom:18px;font-size:10px;color:var(--gry);">±5°C</span>
+      <div class="abs" style="left:6px;top:134px;width:222px;height:8px;background:#1a1a2e;border-radius:4px;overflow:hidden;">
+        <div id="cb-bar-cielo" style="height:100%;width:0%;background:var(--cie);border-radius:4px;transition:width .5s;"></div>
+      </div>
+    </div>
+
+    <!-- Sep y=183 -->
+    <div class="abs" style="left:0;top:183px;width:480px;height:2px;background:#303048;"></div>
+
+    <!-- Nav y=185 h=40: 2+158=160 | 162+158=320 | 322+158=480 ✓  NO header verde -->
+    <div class="btn abs" style="left:2px;top:185px;width:158px;height:40px;background:#002010;border:2px solid #00FF90;border-radius:8px;font-size:13px;color:#00FF90;" onclick="go('rice',null)">≡ RICETTE</div>
+    <div class="btn abs" style="left:162px;top:185px;width:158px;height:40px;background:#101028;border:2px solid #8080FF;border-radius:8px;font-size:13px;color:#8080FF;" onclick="go('timr',null)">↺ TIMER</div>
+    <div class="btn abs" style="left:322px;top:185px;width:158px;height:40px;background:#001424;border:2px solid var(--tun);border-radius:8px;font-size:13px;color:var(--tun);" onclick="go('pid',null)">⚙ PID</div>
+
+    <!-- Sep y=225 -->
+    <div class="abs" style="left:0;top:225px;width:480px;height:2px;background:var(--vio);"></div>
+
+    <!-- SINGLE  x=2 y=227 w=150 h=43 -->
+    <div class="btn abs" id="ctrl-mode" style="left:2px;top:227px;width:150px;height:43px;background:#180028;border:2px solid var(--vio);border-radius:8px;font-size:13px;color:var(--vio);" onclick="toggleMode()">❚❚ SINGLE</div>
+
+    <!-- PanelSplit  x=154 y=227 w=324 h=43  154+324=478 ✓ (hidden by default) -->
+    <div class="abs" id="ctrl-split" style="left:154px;top:227px;width:324px;height:43px;background:#120022;border:1px solid var(--vio);border-radius:8px;display:none;align-items:center;padding:4px;gap:4px;">
+      <span style="font-size:12px;color:var(--acc);padding:0 2px;">B 100%</span>
+      <div class="btn flex-c" style="width:40px;height:35px;background:#1a1a2e;border:1px solid var(--acc);border-radius:5px;font-size:18px;color:var(--acc);">−</div>
+      <div class="btn flex-c" style="width:40px;height:35px;background:#1a1a2e;border:1px solid var(--acc);border-radius:5px;font-size:18px;color:var(--acc);">+</div>
+      <div style="width:2px;height:35px;background:var(--vio);margin:0 2px;flex-shrink:0;"></div>
+      <span style="font-size:12px;color:var(--cie);padding:0 2px;">C 100%</span>
+      <div class="btn flex-c" style="width:40px;height:35px;background:#1a1a2e;border:1px solid var(--cie);border-radius:5px;font-size:18px;color:var(--cie);">−</div>
+      <div class="btn flex-c" style="width:40px;height:35px;background:#1a1a2e;border:1px solid var(--cie);border-radius:5px;font-size:18px;color:var(--cie);">+</div>
+    </div>
+  </div><!-- /CTRL -->
+
+
+  <!-- ══════════════════════════════════════════════
+       PID   480×272
+       Header  y=0  h=32  ←CTRL(92) title (fwd→ x=388 w=90 → 388+90=478 ✓)
+       Sep     y=32
+       Kp row  y=33  h=72
+       Sep     y=105
+       Ki row  y=106 h=72
+       Sep     y=178
+       Kd row  y=179 h=72
+       Footer  y=251 h=21  save btn x=280 w=198 → 280+198=478 ✓
+  ══════════════════════════════════════════════ -->
+  <div class="screen" id="s-pid">
+    <!-- header y=0 h=32 -->
+    <div class="abs flex-c" style="left:0;top:0;width:480px;height:32px;background:var(--acc);">
+      <span style="font-size:14px;color:#000;font-weight:bold;">⚙ PID — BASE</span>
+      <div class="btn abs flex-c" style="left:2px;top:2px;width:90px;height:28px;background:#006030;border-radius:6px;font-size:12px;color:#fff;" onclick="go('ctrl',null)">◀ CTRL</div>
+      <div class="btn abs flex-c" style="left:388px;top:2px;width:90px;height:28px;background:#3a0000;border-radius:6px;font-size:12px;color:var(--cie);">CIELO ▶</div>
+    </div>
+    <div class="abs" style="left:0;top:32px;width:480px;height:2px;background:#404060;"></div>
+    <!-- Kp y=33 h=72 -->
+    <div class="abs" style="left:0;top:33px;width:480px;height:72px;background:#12121E;display:flex;align-items:center;padding:0 6px;gap:6px;">
+      <span style="font-size:28px;color:var(--acc);font-weight:bold;width:44px;">Kp</span>
+      <div class="btn flex-c" style="width:148px;height:48px;background:#1a1a2e;border:2px solid var(--acc);font-size:24px;color:var(--acc);">−</div>
+      <span style="font-size:28px;color:#fff;font-weight:bold;flex:1;text-align:center;">2.00</span>
+      <div class="btn flex-c" style="width:148px;height:48px;background:#1a1a2e;border:2px solid var(--acc);font-size:24px;color:var(--acc);">+</div>
+    </div>
+    <div class="abs" style="left:0;top:105px;width:480px;height:2px;background:#242438;"></div>
+    <!-- Ki y=106 h=72 -->
+    <div class="abs" style="left:0;top:106px;width:480px;height:72px;background:#12121E;display:flex;align-items:center;padding:0 6px;gap:6px;">
+      <span style="font-size:28px;color:var(--acc);font-weight:bold;width:44px;">Ki</span>
+      <div class="btn flex-c" style="width:148px;height:48px;background:#1a1a2e;border:2px solid var(--acc);font-size:24px;color:var(--acc);">−</div>
+      <span style="font-size:28px;color:#fff;font-weight:bold;flex:1;text-align:center;">0.50</span>
+      <div class="btn flex-c" style="width:148px;height:48px;background:#1a1a2e;border:2px solid var(--acc);font-size:24px;color:var(--acc);">+</div>
+    </div>
+    <div class="abs" style="left:0;top:178px;width:480px;height:2px;background:#242438;"></div>
+    <!-- Kd y=179 h=72 -->
+    <div class="abs" style="left:0;top:179px;width:480px;height:72px;background:#12121E;display:flex;align-items:center;padding:0 6px;gap:6px;">
+      <span style="font-size:28px;color:var(--acc);font-weight:bold;width:44px;">Kd</span>
+      <div class="btn flex-c" style="width:148px;height:48px;background:#1a1a2e;border:2px solid var(--acc);font-size:24px;color:var(--acc);">−</div>
+      <span style="font-size:28px;color:#fff;font-weight:bold;flex:1;text-align:center;">0.10</span>
+      <div class="btn flex-c" style="width:148px;height:48px;background:#1a1a2e;border:2px solid var(--acc);font-size:24px;color:var(--acc);">+</div>
+    </div>
+    <!-- Footer y=251 h=21: save x=280 w=198 → 478 ✓ -->
+    <div class="abs" style="left:0;top:251px;width:480px;height:21px;background:#080814;display:flex;align-items:center;padding:0 6px;">
+      <span style="font-size:13px;color:var(--yel);">SET: 250°C</span>
+      <div class="btn" style="margin-left:auto;width:198px;height:17px;background:#002816;border:1px solid var(--grn);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--grn);">💾 Salva Flash</div>
+    </div>
+  </div><!-- /PID -->
+
+
+  <!-- ══════════════════════════════════════════════
+       GRAFICO   480×272
+       Header   y=0  h=32  back btn x=208 w=64 → 272 ✓
+       Y-scale  x=0  w=32
+       Chart    x=32 y=32  w=446 h=192  32+446=478 ✓
+       Sep      y=225
+       Presets  y=227 h=44  2+156=158 | 162+156=318 | 322+156=478 ✓
+  ══════════════════════════════════════════════ -->
+  <div class="screen" id="s-grph">
+    <div class="abs flex-c" style="left:0;top:0;width:480px;height:32px;background:#0C1C0C;border-bottom:2px solid #80FF40;">
+      <span style="font-size:14px;color:#80FF40;font-weight:bold;">📊 GRAFICO TEMPERATURE</span>
+      <div class="btn abs flex-c" style="left:208px;top:2px;width:64px;height:28px;background:#0C1C0C;border:1px solid #80FF40;border-radius:6px;font-size:12px;color:#80FF40;" onclick="go('main',null)">◀ OK</div>
+    </div>
+    <!-- Y-scale labels x=0 y=32 w=32 h=192 -->
+    <div class="abs" style="left:0;top:32px;width:32px;height:192px;display:flex;flex-direction:column;justify-content:space-between;padding:2px 3px 2px 0;text-align:right;">
+      <span style="font-size:9px;color:#506050;">500</span>
+      <span style="font-size:9px;color:#506050;">375</span>
+      <span style="font-size:9px;color:#506050;">250</span>
+      <span style="font-size:9px;color:#506050;">125</span>
+      <span style="font-size:9px;color:#506050;">0</span>
+    </div>
+    <!-- Chart x=32 y=32 w=446 h=192 -->
+    <canvas id="graph-c" class="abs" style="left:32px;top:32px;width:446px;height:192px;" width="446" height="192"></canvas>
+    <!-- Sep y=225 -->
+    <div class="abs" style="left:0;top:225px;width:480px;height:2px;background:#80FF40;"></div>
+    <!-- Presets y=227 h=44: 2+156=158 | 162+156=318 | 322+156=478 ✓ -->
+    <div class="btn abs flex-c" id="p5"  style="left:2px;top:227px;width:156px;height:44px;background:#0C1C0C;border:2px solid #80FF40;border-radius:8px;font-size:16px;color:#80FF40;" onclick="setPreset(5)">5 min</div>
+    <div class="btn abs flex-c" id="p15" style="left:162px;top:227px;width:156px;height:44px;background:#0C1C0C;border:2px solid #80FF40;border-radius:8px;font-size:16px;color:#80FF40;" onclick="setPreset(15)">15 min</div>
+    <div class="btn abs flex-c" id="p30" style="left:322px;top:227px;width:156px;height:44px;background:#0C1C0C;border:2px solid #80FF40;border-radius:8px;font-size:16px;color:#80FF40;" onclick="setPreset(30)">30 min</div>
+  </div><!-- /GRAFICO -->
+
+
+  <!-- ══════════════════════════════════════════════
+       TIMER   480×272
+       Header   y=0  h=32  back x=414 w=64 → 478 ✓
+       Display  y=34 h=88  x=4  w=472  4+472=476 ✓
+       ±5 min   y=125 h=52  2+236=238 | 242+236=478 ✓
+       ±15 min  y=181 h=42  same ✓
+       RESET    y=227 h=30  2+476=478 ✓
+       Status   y=259 h=13  bottom=272 ✓
+  ══════════════════════════════════════════════ -->
+  <div class="screen" id="s-timr">
+    <div class="abs flex-c" style="left:0;top:0;width:480px;height:32px;background:#101028;border-bottom:2px solid #8080FF;">
+      <span style="font-size:14px;color:#8080FF;font-weight:bold;">↺ TIMER COTTURA</span>
+      <div class="btn abs flex-c" style="left:414px;top:2px;width:64px;height:28px;background:#202050;border-radius:6px;font-size:12px;color:#8080FF;" onclick="go('ctrl',null)">◀ OK</div>
+    </div>
+    <!-- Display y=34 h=88 -->
+    <div class="abs flex-c" style="left:4px;top:34px;width:472px;height:88px;background:#080818;border:2px solid #8080FF;border-radius:14px;">
+      <span id="timer-val" style="font-size:54px;font-weight:bold;color:#8080FF;letter-spacing:4px;">10:00</span>
+    </div>
+    <!-- ±5 min y=125 h=52: 2+236=238 | 242+236=478 ✓ -->
+    <div class="btn abs flex-c" style="left:2px;top:125px;width:236px;height:52px;background:#101028;border:2px solid #8080FF;border-radius:8px;font-size:16px;color:#8080FF;" onclick="chTimer(-5)">−5 min</div>
+    <div class="btn abs flex-c" style="left:242px;top:125px;width:236px;height:52px;background:#101028;border:2px solid #8080FF;border-radius:8px;font-size:16px;color:#8080FF;" onclick="chTimer(+5)">+5 min</div>
+    <!-- ±15 min y=181 h=42 -->
+    <div class="btn abs flex-c" style="left:2px;top:181px;width:236px;height:42px;background:#0a0a18;border:2px solid var(--gry);border-radius:8px;font-size:15px;color:var(--gry);" onclick="chTimer(-15)">−15 min</div>
+    <div class="btn abs flex-c" style="left:242px;top:181px;width:236px;height:42px;background:#0a0a18;border:2px solid var(--gry);border-radius:8px;font-size:15px;color:var(--gry);" onclick="chTimer(+15)">+15 min</div>
+    <!-- RESET y=227 h=30: 2+476=478 ✓ -->
+    <div class="btn abs flex-c" style="left:2px;top:227px;width:476px;height:30px;background:#241000;border:2px solid var(--acc);border-radius:8px;font-size:14px;color:var(--acc);" onclick="resetTimer()">⏹ RESET</div>
+    <!-- Status y=259 h=13 → bottom=272 ✓ -->
+    <div class="abs flex-c" id="timer-status" style="left:0;top:259px;width:480px;height:13px;font-size:11px;color:var(--gry);"></div>
+  </div><!-- /TIMER -->
+
+
+  <!-- ══════════════════════════════════════════════
+       RICETTE   480×272
+       Header  y=0  h=32  back x=414 w=64 → 478 ✓
+       4 cards 2×2: w=234 h=114
+         [0] x=2   y=36  → 2+234=236 ✓
+         [1] x=244 y=36  → 244+234=478 ✓
+         [2] x=2   y=156 → same ✓   bottom=156+114=270 ✓
+         [3] x=244 y=156 → same ✓
+  ══════════════════════════════════════════════ -->
+  <div class="screen" id="s-rice">
+    <div class="abs flex-c" style="left:0;top:0;width:480px;height:32px;background:#002814;border-bottom:2px solid #00FF90;">
+      <span style="font-size:14px;color:#00FF90;font-weight:bold;">≡ RICETTE</span>
+      <div class="btn abs flex-c" style="left:414px;top:2px;width:64px;height:28px;background:#002814;border-radius:6px;font-size:12px;color:#00FF90;" onclick="go('ctrl',null)">◀ OK</div>
+    </div>
+    <!-- Card 0: Margherita  x=2 y=36 w=234 h=114 -->
+    <div class="btn abs" style="left:2px;top:36px;width:234px;height:114px;background:#081410;border:2px solid #00FF90;border-radius:10px;padding:8px;display:flex;flex-direction:column;justify-content:space-around;" onclick="pickRicetta(250,300,8)">
+      <div style="text-align:center;font-size:16px;color:#00FF90;font-weight:bold;">Margherita</div>
+      <div style="text-align:center;font-size:14px;color:var(--cie);">↑ CIELO 300°C</div>
+      <div style="text-align:center;font-size:14px;color:var(--acc);">↓ BASE 250°C</div>
+      <div style="text-align:center;font-size:12px;color:var(--gry);">⏱ 8 min</div>
+    </div>
+    <!-- Card 1: Diavola  x=244 y=36 w=234 h=114 -->
+    <div class="btn abs" style="left:244px;top:36px;width:234px;height:114px;background:#081410;border:2px solid #00FF90;border-radius:10px;padding:8px;display:flex;flex-direction:column;justify-content:space-around;" onclick="pickRicetta(260,320,9)">
+      <div style="text-align:center;font-size:16px;color:#00FF90;font-weight:bold;">Diavola</div>
+      <div style="text-align:center;font-size:14px;color:var(--cie);">↑ CIELO 320°C</div>
+      <div style="text-align:center;font-size:14px;color:var(--acc);">↓ BASE 260°C</div>
+      <div style="text-align:center;font-size:12px;color:var(--gry);">⏱ 9 min</div>
+    </div>
+    <!-- Card 2: Calzone  x=2 y=156 w=234 h=114 → bottom=270 ✓ -->
+    <div class="btn abs" style="left:2px;top:156px;width:234px;height:114px;background:#081410;border:2px solid #00FF90;border-radius:10px;padding:8px;display:flex;flex-direction:column;justify-content:space-around;" onclick="pickRicetta(240,280,12)">
+      <div style="text-align:center;font-size:16px;color:#00FF90;font-weight:bold;">Calzone</div>
+      <div style="text-align:center;font-size:14px;color:var(--cie);">↑ CIELO 280°C</div>
+      <div style="text-align:center;font-size:14px;color:var(--acc);">↓ BASE 240°C</div>
+      <div style="text-align:center;font-size:12px;color:var(--gry);">⏱ 12 min</div>
+    </div>
+    <!-- Card 3: Bianca  x=244 y=156 w=234 h=114 → 244+234=478 ✓ -->
+    <div class="btn abs" style="left:244px;top:156px;width:234px;height:114px;background:#081410;border:2px solid #00FF90;border-radius:10px;padding:8px;display:flex;flex-direction:column;justify-content:space-around;" onclick="pickRicetta(255,310,8)">
+      <div style="text-align:center;font-size:16px;color:#00FF90;font-weight:bold;">Bianca</div>
+      <div style="text-align:center;font-size:14px;color:var(--cie);">↑ CIELO 310°C</div>
+      <div style="text-align:center;font-size:14px;color:var(--acc);">↓ BASE 255°C</div>
+      <div style="text-align:center;font-size:12px;color:var(--gry);">⏱ 8 min</div>
+    </div>
+  </div><!-- /RICETTE -->
+
+
+  <!-- ══════════════════════════════════════════════
+       WiFi   480×272
+       Header    y=0  h=32
+       List      y=32 h=180  x=0 w=480
+       Sep       y=212
+       Scan btn  x=2   y=214 w=236 h=26  → 238 ✓
+       Back btn  x=242 y=214 w=236 h=26  → 478 ✓
+       Status    y=242 h=30  x=0 w=480
+  ══════════════════════════════════════════════ -->
+  <div class="screen" id="s-wifi">
+    <div class="abs flex-c" style="left:0;top:0;width:480px;height:32px;background:#002044;border-bottom:2px solid var(--blu);">
+      <span style="font-size:14px;color:var(--blu);font-weight:bold;">📶 WiFi</span>
+      <div class="btn abs flex-c" style="left:414px;top:2px;width:64px;height:28px;background:#002044;border-radius:6px;font-size:12px;color:var(--blu);" onclick="go('main',null)">◀ OK</div>
+    </div>
+    <!-- Network list y=32 h=180 -->
+    <div class="abs" style="left:0;top:32px;width:480px;height:180px;background:#040c18;border-bottom:1px solid #0a2040;overflow:hidden;">
+      <div style="padding:6px 10px;border-bottom:1px solid #0a2040;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--blu);">📶 CasaRete_2.4G</span><span style="font-size:11px;color:var(--gry);">████ -45dBm</span>
+      </div>
+      <div style="padding:6px 10px;border-bottom:1px solid #0a2040;background:#081020;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:#00AAFF;">📶 FornoPizzaAP</span><span style="font-size:11px;color:#00AAFF;">[connesso]</span>
+      </div>
+      <div style="padding:6px 10px;border-bottom:1px solid #0a2040;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--gry);">📶 Rete_vicino</span><span style="font-size:11px;color:var(--gry);">██ -72dBm</span>
+      </div>
+      <div style="padding:6px 10px;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--gry);">📶 AndroidAP</span><span style="font-size:11px;color:var(--gry);">█ -85dBm</span>
+      </div>
+    </div>
+    <!-- Sep y=212 -->
+    <div class="abs" style="left:0;top:212px;width:480px;height:2px;background:#0060BB;"></div>
+    <!-- Buttons y=214 h=26: 2+236=238 | 242+236=478 ✓ -->
+    <div class="btn abs flex-c" style="left:2px;top:214px;width:236px;height:26px;background:#001830;border:2px solid var(--blu);border-radius:8px;font-size:13px;color:var(--blu);">🔍 AGGIORNA</div>
+    <div class="btn abs flex-c" style="left:242px;top:214px;width:236px;height:26px;background:#001830;border:2px solid var(--gry);border-radius:8px;font-size:13px;color:var(--gry);">◀ INDIETRO</div>
+    <!-- Status y=242 h=30 -->
+    <div class="abs" style="left:0;top:242px;width:480px;height:30px;background:#040c18;border-top:1px solid #0060BB;display:flex;align-items:center;padding:0 10px;">
+      <span style="font-size:12px;color:#00AAFF;">● Connesso · IP 192.168.4.1 · RSSI -45dBm</span>
+    </div>
+  </div><!-- /WiFi -->
+
+
+  <!-- ══════════════════════════════════════════════
+       OTA   480×272
+       Header  y=0  h=32
+       URL lbl y=34  URL field y=50 h=38  x=4 w=472 → 476 ✓
+       Keyboard y=92 h=96  x=0 w=480
+       Progress y=192 h=20  x=4 w=400 → 404 ✓  pct lbl x=410 → ~445 ✓
+       Sep     y=216
+       Avvia   y=218 h=34  x=4  w=230 → 234 ✓
+       Annulla y=218 h=34  x=246 w=230 → 476 ✓
+       Status  y=254 h=18  bottom=272 ✓
+  ══════════════════════════════════════════════ -->
+  <div class="screen" id="s-ota">
+    <div class="abs flex-c" style="left:0;top:0;width:480px;height:32px;background:#301400;border-bottom:2px solid var(--acc);">
+      <span style="font-size:13px;color:var(--acc);font-weight:bold;">⬆ OTA FIRMWARE UPDATE</span>
+      <div class="btn abs flex-c" style="left:414px;top:2px;width:64px;height:28px;background:#301400;border-radius:6px;font-size:12px;color:var(--acc);" onclick="go('main',null)">◀ OK</div>
+    </div>
+    <span class="abs" style="left:6px;top:36px;font-size:12px;color:var(--gry);">URL firmware:</span>
+    <div class="abs" style="left:4px;top:50px;width:472px;height:38px;background:#0a0a16;border:2px solid var(--acc);border-radius:6px;display:flex;align-items:center;padding:0 8px;">
+      <span style="font-size:12px;color:#aaa;">http://192.168.1.100/firmware.bin</span>
+    </div>
+    <!-- Keyboard y=92 h=96 x=0 w=480 -->
+    <div class="abs" style="left:0;top:92px;width:480px;height:96px;background:#060610;border-top:1px solid #333;border-bottom:1px solid #333;padding:4px 2px;display:grid;grid-template-columns:repeat(10,1fr);grid-template-rows:repeat(4,1fr);gap:2px;">
+      <div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">q</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">w</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">e</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">r</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">t</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">y</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">u</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">i</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">o</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">p</div>
+      <div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">a</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">s</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">d</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">f</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">g</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">h</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">j</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">k</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">l</div><div class="btn flex-c" style="background:#550000;border:1px solid var(--acc);border-radius:3px;font-size:9px;color:var(--acc);">⌫</div>
+      <div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">z</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">x</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">c</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">v</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">b</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">n</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">m</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">.</div><div class="btn flex-c" style="background:#1a1a2e;border:1px solid #333;border-radius:3px;font-size:10px;color:#aaa;">/</div><div class="btn flex-c" style="background:#003820;border:1px solid var(--grn);border-radius:3px;font-size:9px;color:var(--grn);">↵</div>
+      <div style="grid-column:1/4"></div><div class="btn flex-c" style="grid-column:4/10;background:#1a1a2e;border:1px solid #444;border-radius:3px;font-size:10px;color:#888;">SPACE</div><div></div>
+    </div>
+    <!-- Progress y=192 h=20: bar x=4 w=400→404 ✓, pct x=410 ✓ -->
+    <div class="abs" style="left:4px;top:192px;width:400px;height:20px;background:#0a0a16;border:1px solid #444;border-radius:10px;overflow:hidden;">
+      <div id="ota-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--acc),#FFB300);border-radius:10px;transition:width 1s;"></div>
+    </div>
+    <div class="abs flex-c" id="ota-pct" style="left:408px;top:192px;width:68px;height:20px;font-size:12px;color:#fff;">0%</div>
+    <!-- Sep y=216 -->
+    <div class="abs" style="left:0;top:216px;width:480px;height:2px;background:#604020;"></div>
+    <!-- Buttons y=218 h=34: 4+230=234 | 246+230=476 ✓ -->
+    <div class="btn abs flex-c" style="left:4px;top:218px;width:230px;height:34px;background:#1a0800;border:2px solid var(--acc);border-radius:8px;font-size:14px;color:var(--acc);" onclick="startOTA()">⬆ AVVIA OTA</div>
+    <div class="btn abs flex-c" style="left:246px;top:218px;width:230px;height:34px;background:#1a0000;border:2px solid var(--cie);border-radius:8px;font-size:14px;color:var(--cie);">✕ ANNULLA</div>
+    <!-- Status y=254 h=18 → bottom=272 ✓ -->
+    <div class="abs flex-c" id="ota-status" style="left:0;top:254px;width:480px;height:18px;font-size:11px;color:var(--gry);">Pronto</div>
+  </div><!-- /OTA -->
+
+  </div><!-- .display -->
+</div>
+
+<!-- ═══════════════════ SIMULATOR ═══════════════════ -->
+<div class="sim">
+  <h3>🎛 Simulatore</h3>
+  <label>T BASE<input type="range" id="s-tb" min="0" max="500" value="180" oninput="simUpdate()"><span id="sv-tb" style="width:32px;text-align:right;color:var(--acc);">180</span></label>
+  <label>T CIELO<input type="range" id="s-tc" min="0" max="500" value="220" oninput="simUpdate()"><span id="sv-tc" style="width:32px;text-align:right;color:var(--cie);">220</span></label>
+  <label>SET B<input type="range" id="s-sb" min="50" max="500" value="250" oninput="simUpdate()"><span id="sv-sb" style="width:32px;text-align:right;color:var(--yel);">250</span></label>
+  <label>SET C<input type="range" id="s-sc" min="50" max="500" value="300" oninput="simUpdate()"><span id="sv-sc" style="width:32px;text-align:right;color:var(--yel);">300</span></label>
+  <label>PID B%<input type="range" id="s-pb" min="0" max="100" value="45" oninput="simUpdate()"><span id="sv-pb" style="width:32px;text-align:right;color:var(--acc);">45</span></label>
+  <label>PID C%<input type="range" id="s-pc" min="0" max="100" value="60" oninput="simUpdate()"><span id="sv-pc" style="width:32px;text-align:right;color:var(--cie);">60</span></label>
+  <label>Modo<select id="s-mode" onchange="simUpdate()"><option value="d">DUAL</option><option value="s" selected>SINGLE</option></select></label>
+  <label>Safety<select id="s-sfty" onchange="simUpdate()"><option value="0" selected>OK</option><option value="1">SHUTDOWN</option></select></label>
+  <div style="margin-top:6px;font-size:10px;color:#444;line-height:1.4;">
+    Tutti i valori rispettano<br>il limite 480×272px
+  </div>
+</div>
+
+</div><!-- .outer -->
+
+<script>
+// ─── State ───────────────────────────────────────────
+const S = {
+  tb:180, tc:220, sb:250, sc:300, pb:45, pc:60,
+  baseOn:false, cieloOn:false, luceOn:false,
+  single:true, safety:false,
+  timerSec:600, timerRunning:false,
+  otaRunning:false,
+  gPreset:5,
+};
+
+// ─── Screen switch ────────────────────────────────────
+const screenIds = ['main','ctrl','pid','grph','timr','rice','wifi','ota'];
+function go(id, tabEl) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('s-'+id).classList.add('active');
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(t => t.classList.remove('active'));
+  if (tabEl) { tabEl.classList.add('active'); }
+  else {
+    const idx = screenIds.indexOf(id);
+    if (idx >= 0) tabs[idx].classList.add('active');
+  }
+  if (id === 'grph') drawGraph();
+}
+
+// ─── Colour helpers ───────────────────────────────────
+function tempColor(t, sp) {
+  const r = t / sp;
+  if (r < 0.4)  return '#4040FF';
+  if (r < 0.7)  return '#00DDFF';
+  if (r < 0.85) return '#00FF80';
+  if (r < 0.95) return '#FFD600';
+  if (r < 1.05) return '#FFFFFF';
+  return '#FF4444';
+}
+
+// ─── Main sim update ──────────────────────────────────
+function simUpdate() {
+  S.tb = +document.getElementById('s-tb').value;
+  S.tc = +document.getElementById('s-tc').value;
+  S.sb = +document.getElementById('s-sb').value;
+  S.sc = +document.getElementById('s-sc').value;
+  S.pb = +document.getElementById('s-pb').value;
+  S.pc = +document.getElementById('s-pc').value;
+  S.single = document.getElementById('s-mode').value === 's';
+  S.safety = document.getElementById('s-sfty').value === '1';
+
+  // update value labels
+  ['tb','tc','sb','sc','pb','pc'].forEach(k => {
+    document.getElementById('sv-'+k).textContent = S[k];
+  });
+
+  // MAIN panels
+  const tbR = Math.round(S.tb), tcR = Math.round(S.tc);
+  document.getElementById('mt-base').textContent  = tbR + '°';
+  document.getElementById('mt-cielo').textContent = tcR + '°';
+  document.getElementById('mt-base').style.color  = tempColor(S.tb, S.sb);
+  document.getElementById('mt-cielo').style.color = tempColor(S.tc, S.sc);
+  document.getElementById('mb-base').style.width  = S.pb + '%';
+  document.getElementById('mb-cielo').style.width = S.pc + '%';
+  document.getElementById('mp-base').textContent  = 'PID ' + S.pb + '%';
+  document.getElementById('mp-cielo').textContent = 'PID ' + S.pc + '%';
+
+  // status
+  document.getElementById('main-status').textContent = S.single
+    ? `SINGLE | T:${tcR} SP:${S.sc} | B:${S.pb}%`
+    : `DUAL | B:${tbR}/${S.sb}  C:${tcR}/${S.sc}`;
+
+  // safety
+  document.getElementById('main-safety').style.display = S.safety ? 'flex' : 'none';
+
+  // fan
+  const fan = (S.baseOn || S.cieloOn) && (S.tb > 80 || S.tc > 80);
+  const lf = document.getElementById('led-fan');
+  lf.style.background = fan ? '#00FFCC' : '#222';
+  lf.style.boxShadow  = fan ? '0 0 6px #00FFCC' : 'none';
+
+  // CTRL arcs  circumference = 2π × 44 ≈ 276.5
+  const C = 276.5, frac = 0.75;
+  const bD = C * frac * Math.min(S.sb / 500, 1);
+  const cD = C * frac * Math.min(S.sc / 500, 1);
+  document.getElementById('arc-base').setAttribute('stroke-dasharray',  bD + ' ' + C);
+  document.getElementById('arc-cielo').setAttribute('stroke-dasharray', cD + ' ' + C);
+  document.getElementById('cs-base').textContent  = S.sb + '°C';
+  document.getElementById('cs-cielo').textContent = S.sc + '°C';
+  document.getElementById('cb-bar-base').style.width  = S.pb + '%';
+  document.getElementById('cb-bar-cielo').style.width = S.pc + '%';
+}
+
+// ─── Toggle helpers ───────────────────────────────────
+function applyToggle(ids, on, onTxt, offTxt, onBg, offBg, onBorder, offBorder, onCol, offCol) {
+  ids.forEach(id => {
+    const el = document.getElementById(id); if (!el) return;
+    el.textContent = on ? onTxt : offTxt;
+    el.style.background   = on ? onBg    : offBg;
+    el.style.borderColor  = on ? onBorder: offBorder;
+    el.style.color        = on ? onCol   : offCol;
+  });
+}
+
+function toggleBase() {
+  S.baseOn = !S.baseOn;
+  const on = S.baseOn;
+  applyToggle(['be-base','cb-base'], on, 'BASE ON','BASE OFF',
+    '#280000','#1a1a2e','var(--acc)','var(--gry)','var(--acc)','var(--gry)');
+  const l = document.getElementById('led-base');
+  l.style.background = on ? 'var(--acc)' : '#333';
+  l.style.boxShadow  = on ? '0 0 8px var(--acc)' : 'none';
+  simUpdate();
+}
+function toggleCielo() {
+  S.cieloOn = !S.cieloOn;
+  const on = S.cieloOn;
+  applyToggle(['be-cielo','cb-cielo'], on, 'CIELO ON','CIELO OFF',
+    '#280000','#1a1a2e','var(--cie)','var(--gry)','var(--cie)','var(--gry)');
+  const l = document.getElementById('led-cielo');
+  l.style.background = on ? 'var(--cie)' : '#333';
+  l.style.boxShadow  = on ? '0 0 8px var(--cie)' : 'none';
+  simUpdate();
+}
+function toggleLuce() {
+  S.luceOn = !S.luceOn;
+  const on = S.luceOn;
+  applyToggle(['be-luce','cb-luce'], on, '⚡ LUCE ON','⚡ LUCE OFF',
+    '#201800','#1a1a2e','var(--luc)','var(--gry)','var(--luc)','var(--gry)');
+}
+function toggleMode() {
+  S.single = !S.single;
+  document.getElementById('s-mode').value = S.single ? 's' : 'd';
+  document.getElementById('ctrl-mode').textContent = S.single ? '❚❚ SINGLE' : '⬡ DUAL';
+  document.getElementById('ctrl-split').style.display = S.single ? 'none' : 'flex';
+  simUpdate();
+}
+
+// ─── Setpoint change ──────────────────────────────────
+function chSet(ch, d) {
+  if (ch === 'base') {
+    S.sb = Math.max(50, Math.min(500, S.sb + d));
+    document.getElementById('s-sb').value = S.sb;
+  } else {
+    S.sc = Math.max(50, Math.min(500, S.sc + d));
+    document.getElementById('s-sc').value = S.sc;
+  }
+  simUpdate();
+}
+
+// ─── Timer ────────────────────────────────────────────
+function fmt(s) {
+  const m = Math.floor(Math.abs(s)/60), ss = Math.abs(s) % 60;
+  return (s<0?'-':'') + String(m).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
+}
+function updateTimer() { document.getElementById('timer-val').textContent = fmt(S.timerSec); }
+function chTimer(m) { S.timerSec = Math.max(0, Math.min(3600, S.timerSec + m*60)); updateTimer(); }
+function resetTimer() {
+  S.timerSec = 600; S.timerRunning = false; updateTimer();
+  document.getElementById('timer-status').textContent = '';
+}
+setInterval(() => {
+  if (S.timerRunning && S.timerSec > 0) {
+    S.timerSec--;
+    updateTimer();
+    if (S.timerSec === 0) {
+      const el = document.getElementById('timer-status');
+      el.textContent = '⚠ COTTURA COMPLETATA!';
+      el.style.color = 'var(--acc)';
+    }
+  }
+}, 1000);
+
+// ─── Ricette ──────────────────────────────────────────
+function pickRicetta(base, cielo, min) {
+  S.sb = base; S.sc = cielo; S.timerSec = min * 60;
+  document.getElementById('s-sb').value = base;
+  document.getElementById('s-sc').value = cielo;
+  simUpdate(); updateTimer(); go('ctrl', null);
+}
+
+// ─── Graph ────────────────────────────────────────────
+function setPreset(m) {
+  S.gPreset = m;
+  ['p5','p15','p30'].forEach((id,i) => {
+    const active = [5,15,30][i] === m;
+    document.getElementById(id).style.background  = active ? '#1C3C1C' : '#0C1C0C';
+    document.getElementById(id).style.fontWeight  = active ? 'bold' : 'normal';
+  });
+  drawGraph();
+}
+function drawGraph() {
+  const cv = document.getElementById('graph-c'); if (!cv) return;
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#050905'; ctx.fillRect(0,0,W,H);
+  // grid
+  ctx.strokeStyle = '#1a2a1a'; ctx.lineWidth = 1;
+  for (let i=0;i<=4;i++){const y=H-(i/4)*H;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  for (let i=0;i<=8;i++){const x=(i/8)*W;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  // setpoint dashed lines
+  ctx.setLineDash([4,4]);
+  ctx.strokeStyle = 'rgba(255,107,0,.35)';
+  const yb = H-(S.sb/500)*H; ctx.beginPath(); ctx.moveTo(0,yb); ctx.lineTo(W,yb); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,48,48,.35)';
+  const yc = H-(S.sc/500)*H; ctx.beginPath(); ctx.moveTo(0,yc); ctx.lineTo(W,yc); ctx.stroke();
+  ctx.setLineDash([]);
+  // generate fake curves
+  const pts = S.gPreset * 60, step = W / pts;
+  function gen(sp, s0) {
+    let t = sp * s0, a = [];
+    for (let i=0; i<pts; i++) {
+      const tg = sp * (0.5 + 0.5 * (i/pts));
+      t += (tg-t)*0.025 + (Math.random()-.5)*3;
+      a.push(Math.max(0, Math.min(520, t)));
+    }
+    return a;
+  }
+  const bd = gen(S.sb, 0.5), cd = gen(S.sc, 0.45);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#FF8C00'; ctx.beginPath();
+  bd.forEach((v,i) => { const x=i*step, y=H-(v/500)*H; i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+  ctx.strokeStyle = '#FF3030'; ctx.beginPath();
+  cd.forEach((v,i) => { const x=i*step, y=H-(v/500)*H; i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+  // legend
+  ctx.fillStyle='#FF8C00'; ctx.fillRect(4,4,14,4);
+  ctx.fillStyle='#aaa'; ctx.font='10px sans-serif'; ctx.fillText('BASE',22,12);
+  ctx.fillStyle='#FF3030'; ctx.fillRect(62,4,14,4);
+  ctx.fillStyle='#aaa'; ctx.fillText('CIELO',80,12);
+}
+
+// ─── OTA ─────────────────────────────────────────────
+function startOTA() {
+  if (S.otaRunning) return;
+  S.otaRunning = true; let p = 0;
+  const st = document.getElementById('ota-status');
+  st.textContent = 'Download...'; st.style.color = 'var(--acc)';
+  const iv = setInterval(() => {
+    p += Math.random() * 3;
+    if (p >= 100) {
+      p = 100; clearInterval(iv); S.otaRunning = false;
+      st.textContent = '✓ Completato! Riavvio in corso...'; st.style.color = 'var(--grn)';
+    }
+    document.getElementById('ota-bar').style.width = p + '%';
+    document.getElementById('ota-pct').textContent = Math.round(p) + '%';
+  }, 150);
+}
+
+// ─── Live temperature drift ───────────────────────────
+setInterval(() => {
+  const nb = Math.max(20, Math.min(450, S.tb + (Math.random()-.5)*2));
+  const nc = Math.max(20, Math.min(450, S.tc + (Math.random()-.5)*2));
+  S.tb = nb; S.tc = nc;
+  document.getElementById('s-tb').value = Math.round(nb);
+  document.getElementById('s-tc').value = Math.round(nc);
+  document.getElementById('sv-tb').textContent = Math.round(nb);
+  document.getElementById('sv-tc').textContent = Math.round(nc);
+  document.getElementById('mt-base').textContent  = Math.round(nb) + '°';
+  document.getElementById('mt-cielo').textContent = Math.round(nc) + '°';
+  document.getElementById('mt-base').style.color  = tempColor(nb, S.sb);
+  document.getElementById('mt-cielo').style.color = tempColor(nc, S.sc);
+}, 2000);
+
+setInterval(() => {
+  if (document.getElementById('s-grph').classList.contains('active')) drawGraph();
+}, 3500);
+
+// ─── Init ─────────────────────────────────────────────
+simUpdate();
+setPreset(5);
+</script>
+</body>
+</html>
