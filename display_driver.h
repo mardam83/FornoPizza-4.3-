@@ -16,7 +16,7 @@
 // ── OBBLIGATORIO prima di LovyanGFX.hpp per abilitare i panel V1 ──
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
-//#include <lgfx/v1/platforms/esp32s3/Panel_ST7701S.h>
+#include <LGFX_JC4827W543_4.3inch_ESP32S3.h>
 #include <lvgl.h>
 #include <esp_heap_caps.h>
 #include "hardware.h"
@@ -26,8 +26,8 @@
 // ================================================================
 
 class LGFX : public lgfx::LGFX_Device {
-  lgfx::Panel_RGB      _panel_instance;
-  lgfx::Bus_RGB        _bus_instance;
+  lgfx::Panel_ST7701S  _panel_instance;
+  lgfx::Bus_SPI        _bus_instance; // O quello che hai ora
   lgfx::Light_PWM      _light_instance;
 
 public:
