@@ -67,11 +67,6 @@
 // ================================================================
 // Backlight gestito da LovyanGFX — nessun TFT_BL_PIN manuale
 
-// MAX6675 — SPI bit-bang (puoi cambiare i pin liberamente su ESP32-S3)
-#define TC_SCK          11
-#define TC_MISO         13
-#define TC_CS_BASE      10
-#define TC_CS_CIELO     12
 
 // ================================================================
 //  PARAMETRI SICUREZZA (invariati)
