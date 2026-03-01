@@ -15,6 +15,7 @@
 
 // ── OBBLIGATORIO prima di LovyanGFX.hpp per abilitare i panel V1 ──
 #define LGFX_USE_V1
+#define LGFX_ESP32_S3 
 #include <LovyanGFX.hpp>
 #include <LGFX_JC4827W543_4.3inch_ESP32S3.h>
 #include <lvgl.h>
