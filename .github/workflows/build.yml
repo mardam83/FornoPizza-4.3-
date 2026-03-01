@@ -1,14 +1,14 @@
-name: FornoPizza Build & Release
+name: FornoPizza_S3 Build & Release
 
 on:
   push:
-    branches: [ "**" ]        # compila ad ogni push su qualsiasi branch
+    branches: [ "**" ]
   pull_request:
     branches: [ main, master ]
 
 jobs:
   build:
-    name: Build Firmware
+    name: Build Firmware ESP32-S3
     runs-on: ubuntu-latest
 
     steps:
@@ -23,9 +23,9 @@ jobs:
           path: |
             ~/.arduino15
             ~/Arduino/libraries
-          key: arduino-esp32-${{ hashFiles('.github/workflows/build.yml') }}
+          key: arduino-esp32s3-${{ hashFiles('.github/workflows/build.yml') }}
           restore-keys: |
-            arduino-esp32-
+            arduino-esp32s3-
 
       # ── 3. Installa Arduino CLI ───────────────────────────────────
       - name: Install Arduino CLI
@@ -40,31 +40,32 @@ jobs:
             --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
 
       # ── 5. Installa librerie ──────────────────────────────────────
+      # LovyanGFX >= 1.2.x include Panel_RGB e Bus_RGB per ESP32-S3
+      # NON installare TFT_eSPI né XPT2046_Touchscreen (rimossi nel porting)
       - name: Install libraries
         run: |
           arduino-cli lib install \
             "LovyanGFX" \
-            "lvgl@8.3.11" \
+            "lvgl@8.4.0" \
             "MAX6675 library" \
             "PID" \
             "PubSubClient" \
             "ArduinoJson"
 
-      # ── 6. Patch lv_conf.h — ERRORI NOTI ─────────────────────────
-      - name: Patch lv_conf.h (errori noti LVGL)
+      # ── 6. Patch lv_conf.h ───────────────────────────────────────
+      - name: Patch lv_conf.h
         run: |
           LV_CONF=$(find ~/.arduino15 ~/Arduino/libraries -name "lv_conf.h" 2>/dev/null | head -1)
           if [ -n "$LV_CONF" ]; then
             echo "Patching: $LV_CONF"
             sed -i 's/^#define LV_MEM_POOL_INCLUDE/\/\/#define LV_MEM_POOL_INCLUDE/' "$LV_CONF" || true
-            sed -i "s/#define LV_TXT_COLOR_CMD\s*'#'/#define LV_TXT_COLOR_CMD \"#\"/" "$LV_CONF" || true
             echo "Patch completata"
           else
             echo "lv_conf.h non trovato -- skip patch"
           fi
 
       # ── 7. Usa lv_conf.h del progetto (se presente nella repo) ───
-      - name: Use project lv_conf.h (if present)
+      - name: Use project lv_conf.h
         run: |
           if [ -f "lv_conf.h" ]; then
             LV_DIR=$(find ~/.arduino15 ~/Arduino/libraries -maxdepth 3 -name "lvgl" -type d 2>/dev/null | head -1)
@@ -75,24 +76,28 @@ jobs:
           fi
 
       # ── 8. Compila ────────────────────────────────────────────────
-      # Impostazioni board (ESP32-S3-WROOM-1-N4R8):
-      #   CPU Frequency:    240 MHz (WiFi/BT)
-      #   Flash Frequency:  80 MHz QIO 4 MB
-      #   Partition:        Minimal SPIFFS (1.9 MB APP + OTA / 128 KB SPIFFS)
-      #   PSRAM:            OPI PSRAM  ← N4R8 usa PSRAM OPI (8 MB)
-      #   Events / Arduino: Core 1
+      # Board: ESP32-S3-WROOM-1-N16R8 (JC4827W543C monta N16R8)
+      #   CPUFreq:         240 MHz
+      #   FlashSize:       16 MB  (N16R8)
+      #   FlashMode:       QIO
+      #   FlashFreq:       80 MHz
+      #   PartitionScheme: default_16MB  (due OTA da ~6 MB + SPIFFS)
+      #   PSRAM:           OPI PSRAM 8 MB  (necessario per framebuffer RGB)
+      #   USBMode:         hwcdc  (USB-CDC nativa ESP32-S3)
+      #   EventsCore:      Core 1
+      #   ArduinoCore:     Core 1
       #
-      # NOTA: su N4R8 la PSRAM è OPI (Octal SPI) — i GPIO 33-37 sono
-      # riservati internamente dal bus OPI e NON devono essere usati.
+      # NOTA PSRAM OPI: GPIO 33-37 riservati internamente — NON usarli.
+      # Il display RGB usa la periferica LCD_CAM dell'ESP32-S3 via Bus_RGB.
       - name: Compile sketch
         run: |
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:CPUFreq=240,FlashFreq=80,FlashMode=qio,FlashSize=4M,PartitionScheme=min_spiffs,PSRAM=opi,EventsCore=1,ArduinoCore=1" \
+            --fqbn "esp32:esp32:esp32s3:CPUFreq=240,FlashSize=16M,FlashMode=qio,FlashFreq=80,PartitionScheme=default_16MB,PSRAM=opi,USBMode=hwcdc,EventsCore=1,ArduinoCore=1" \
             --output-dir ./build \
             --warnings default \
-            .
+            ./FornoPizza_S3
 
-      # ── 9. Mostra dimensione binari ──────────────────────────────
+      # ── 9. Mostra dimensione binari ─────────────────────────────
       - name: Show firmware size
         run: |
           echo "=== Firmware generati ==="
@@ -102,14 +107,14 @@ jobs:
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FornoPizza-firmware-${{ github.ref_name }}-${{ github.run_number }}
+          name: FornoPizza_S3-firmware-${{ github.ref_name }}-${{ github.run_number }}
           path: |
             ./build/*.bin
             ./build/*.elf
           retention-days: 30
 
   # ════════════════════════════════════════════════════════════════
-  #  RELEASE -- si attiva solo su tag: git tag v1.0 && git push --tags
+  #  RELEASE — si attiva solo su tag: git tag v1.0 && git push --tags
   # ════════════════════════════════════════════════════════════════
   release:
     name: Create GitHub Release
@@ -125,42 +130,44 @@ jobs:
       - name: Download firmware artifacts
         uses: actions/download-artifact@v4
         with:
-          name: FornoPizza-firmware-${{ github.ref_name }}-${{ github.run_number }}
+          name: FornoPizza_S3-firmware-${{ github.ref_name }}-${{ github.run_number }}
           path: ./release
 
       - name: Rinomina binari con versione
         run: |
           TAG="${{ github.ref_name }}"
           for f in ./release/*.bin; do
-            mv "$f" "./release/FornoPizza_${TAG}_$(basename $f)"
+            mv "$f" "./release/FornoPizza_S3_${TAG}_$(basename $f)"
           done
           echo "=== File release ===" && ls -lh ./release/
 
       - name: Crea Release GitHub
         uses: softprops/action-gh-release@v2
         with:
-          name: "FornoPizza ${{ github.ref_name }}"
+          name: "FornoPizza S3 ${{ github.ref_name }}"
           body: |
-            ## FornoPizza ${{ github.ref_name }}
+            ## FornoPizza S3 ${{ github.ref_name }}
+
+            ### Hardware target
+            | Componente | Dettaglio |
+            |---|---|
+            | MCU | ESP32-S3-WROOM-1-N16R8 |
+            | Display | 4.3" ST7701S RGB 480×272 (Bus_RGB parallelo) |
+            | Touch | GT911 I2C capacitivo |
+            | PSRAM | OPI 8 MB (GPIO 33-37 riservati) |
+            | Flash | 16 MB QIO 80 MHz |
+            | Partition | default_16MB — 2×6 MB OTA + SPIFFS |
+            | CPU | 240 MHz (WiFi/BT) |
+            | Events / Arduino | Core 1 |
 
             ### Flash iniziale via USB
             ```bash
             esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
-              write_flash -z 0x10000 FornoPizza_${{ github.ref_name }}_*.bin
+              write_flash -z 0x10000 FornoPizza_S3_${{ github.ref_name }}_*.bin
             ```
 
             ### Aggiornamento OTA
             Usa l'interfaccia web integrata del forno (WiFi → OTA Update).
-
-            | Parametro | Valore |
-            |---|---|
-            | MCU | ESP32-S3-WROOM-1-N4R8 |
-            | CPU | 240 MHz (WiFi/BT) |
-            | Flash | 80 MHz QIO 4 MB |
-            | Partition | Minimal SPIFFS — 1.9 MB APP + OTA + 128 KB SPIFFS |
-            | PSRAM | OPI 8 MB |
-            | Display buffer | Double full framebuffer PSRAM (2 × 255 KB) + DMA SPI |
-            | Events / Arduino | Core 1 |
           files: ./release/*.bin
           draft: false
           prerelease: false
