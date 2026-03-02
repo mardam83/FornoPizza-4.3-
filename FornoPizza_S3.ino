@@ -625,6 +625,15 @@ void setup() {
   Serial.printf("\n=== FORNO PIZZA v15.0 — ESP32-S3 | ST7701S 480x272 | GT911 ===\n");
   Serial.printf("setup() su Core %d\n", xPortGetCoreID());
 
+  // Verifica se la PSRAM è stata inizializzata correttamente
+  if(psramInit()){
+    Serial.println("PSRAM inizializzata correttamente!");
+    Serial.printf("Totale PSRAM: %d byte\n", ESP.getPsramSize());
+    Serial.printf("PSRAM libera: %d byte\n", ESP.getFreePsram());
+  } else {
+    Serial.println("ERRORE: PSRAM non trovata o non inizializzata.");
+  }
+
   // ---- Relay OFF come prima cosa assoluta ----
   RELAY_INIT(RELAY_BASE,  RELAY_BASE_INV);
   RELAY_INIT(RELAY_CIELO, RELAY_CIELO_INV);

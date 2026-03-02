@@ -1,15 +1,20 @@
 /**
- * ui_wifi.cpp — Forno Pizza v21-S3
+ * ui_wifi.cpp — Forno Pizza v22-S3
  * ================================================================
- * Schermate adattate per 480×272 (da 320×240):
+ * Schermate adattate per 480×272:
  *   WIFI_SCAN  → lista reti scrollabile + status
  *   WIFI_PWD   → tastiera LVGL inserimento password
  *   OTA        → URL firmware + barra progresso
+ *
+ * MODIFICA v22: ANIMAZIONE 13 — barra OTA fluida + pulse label %
+ *   ui_ota_update_progress() ora usa anim_ota_bar_update() invece
+ *   di lv_bar_set_value(... LV_ANIM_OFF).
  * ================================================================
  */
 
 #include "ui_wifi.h"
 #include "ui.h"
+#include "ui_animations.h"    // ← NUOVO v22: anim_ota_bar_update
 #include <lvgl.h>
 #include <WiFi.h>
 
@@ -46,15 +51,15 @@ lv_obj_t* ui_BtnOtaBack    = NULL;
 lv_obj_t* ui_OtaStatusLbl  = NULL;
 
 WifiNetInfo  g_wifi_nets[WIFI_SCAN_MAX] = {};
-volatile int g_wifi_net_count     = 0;
+volatile int g_wifi_net_count      = 0;
 char         g_wifi_selected_ssid[33] = "";
 volatile bool g_wifi_scan_request  = false;
 
-volatile int  g_ota_progress      = 0;
-volatile bool g_ota_running       = false;
-volatile bool g_ota_start_request = false;
-char          g_ota_url[256]      = "";
-char          g_ota_status_msg[64]= "Inserisci URL e premi AVVIA";
+volatile int  g_ota_progress       = 0;
+volatile bool g_ota_running        = false;
+volatile bool g_ota_start_request  = false;
+char          g_ota_url[256]       = "";
+char          g_ota_status_msg[64] = "Inserisci URL e premi AVVIA";
 
 // ================================================================
 //  COLORI LOCALI
@@ -83,7 +88,7 @@ static void cb_ota_start_btn(lv_event_t* e);
 static void cb_ota_back_btn(lv_event_t* e);
 
 // ================================================================
-//  HELPER: bottone azione (bordato, sfondo scuro)
+//  HELPER: bottone azione
 // ================================================================
 static lv_obj_t* make_action_btn(lv_obj_t* parent,
                                   int x, int y, int w, int h,
@@ -91,8 +96,7 @@ static lv_obj_t* make_action_btn(lv_obj_t* parent,
                                   lv_color_t border_col,
                                   lv_event_cb_t cb) {
     lv_obj_t* b = lv_btn_create(parent);
-    lv_obj_set_pos(b, x, y);
-    lv_obj_set_size(b, w, h);
+    lv_obj_set_pos(b, x, y); lv_obj_set_size(b, w, h);
     lv_obj_set_style_bg_color(b, lv_color_make(0x1C, 0x1C, 0x2C), 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(b, border_col, 0);
@@ -128,14 +132,12 @@ static const char* rssi_symbol(int32_t rssi) {
 }
 
 // ================================================================
-//  BUILD — WIFI_SCAN
-// ================================================================
-// Layout 480×272:
-//   Header      y=0..31   h=32  — titolo centrato
-//   Lista reti  y=32..211 h=180 — scrollabile
-//   Sep         y=212     h=2
-//   Azioni      y=214..237 h=24 — AGGIORNA(234) | INDIETRO(234)
-//   Status      y=240..271 h=32 — label connessione
+//  BUILD — WIFI_SCAN (480×272)
+//  Header      y=0..31   h=32
+//  Lista reti  y=32..211 h=180 (scrollabile)
+//  Sep         y=212     h=2
+//  Azioni      y=214..237 h=24 — AGGIORNA(234) | INDIETRO(234)
+//  Status      y=240..271 h=32
 // ================================================================
 void ui_build_wifi(void) {
     ui_ScreenWifi = lv_obj_create(NULL);
@@ -145,8 +147,7 @@ void ui_build_wifi(void) {
 
     // Header
     lv_obj_t* hdr = lv_obj_create(ui_ScreenWifi);
-    lv_obj_set_pos(hdr, 0, 0);
-    lv_obj_set_size(hdr, 480, 32);
+    lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, 32);
     lv_obj_set_style_bg_color(hdr, COL_WIFI, 0);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(hdr, 0, 0);
@@ -159,112 +160,97 @@ void ui_build_wifi(void) {
     lv_obj_set_style_text_color(hdr_lbl, lv_color_black(), 0);
     lv_obj_align(hdr_lbl, LV_ALIGN_CENTER, 0, 0);
 
-    // Pannello lista (scrollabile)
+    // Pannello lista scrollabile
     lv_obj_t* list_panel = lv_obj_create(ui_ScreenWifi);
-    lv_obj_set_pos(list_panel, 0, 32);
-    lv_obj_set_size(list_panel, 480, 180);
-    lv_obj_set_style_bg_color(list_panel, lv_color_make(0x14, 0x14, 0x22), 0);
+    lv_obj_set_pos(list_panel, 0, 32); lv_obj_set_size(list_panel, 480, 180);
+    lv_obj_set_style_bg_color(list_panel, lv_color_make(0x14,0x14,0x22), 0);
     lv_obj_set_style_bg_opa(list_panel, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(list_panel, 0, 0);
     lv_obj_set_style_radius(list_panel, 0, 0);
     lv_obj_set_style_pad_all(list_panel, 2, 0);
-    lv_obj_set_flex_flow(list_panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(list_panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // Lista reti
     ui_WifiList = lv_list_create(list_panel);
-    lv_obj_set_size(ui_WifiList, 476, 176);
-    lv_obj_set_style_bg_color(ui_WifiList, lv_color_make(0x14, 0x14, 0x22), 0);
+    lv_obj_set_pos(ui_WifiList, 0, 0); lv_obj_set_size(ui_WifiList, 476, 176);
+    lv_obj_set_style_bg_color(ui_WifiList, lv_color_make(0x14,0x14,0x22), 0);
     lv_obj_set_style_bg_opa(ui_WifiList, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(ui_WifiList, 0, 0);
     lv_obj_set_style_pad_row(ui_WifiList, 2, 0);
-    lv_obj_set_style_pad_all(ui_WifiList, 2, 0);
-    lv_list_add_text(ui_WifiList, "Premi AGGIORNA per scansionare...");
 
-    // Separatore y=212
+    // Separatore
     lv_obj_t* sep = lv_obj_create(ui_ScreenWifi);
-    lv_obj_set_pos(sep, 0, 212);
-    lv_obj_set_size(sep, 480, 2);
+    lv_obj_set_pos(sep, 0, 212); lv_obj_set_size(sep, 480, 2);
     lv_obj_set_style_bg_color(sep, COL_WIFI, 0);
     lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(sep, 0, 0);
-    lv_obj_set_style_radius(sep, 0, 0);
 
-    // Pulsanti azione y=214 h=26 — larghezza 238 ciascuno
+    // Pulsanti
     ui_BtnWifiScan = make_action_btn(ui_ScreenWifi,
-        2, 214, 236, 26, LV_SYMBOL_REFRESH " AGGIORNA", COL_WIFI, cb_wifi_scan_btn);
+        2, 214, 234, 24, LV_SYMBOL_REFRESH " AGGIORNA", COL_WIFI, cb_wifi_scan_btn);
     ui_BtnWifiBack = make_action_btn(ui_ScreenWifi,
-        242, 214, 236, 26, LV_SYMBOL_LEFT " INDIETRO", COL_GRAY, cb_wifi_back_btn);
+        244, 214, 234, 24, LV_SYMBOL_LEFT " INDIETRO", COL_GRAY, cb_wifi_back_btn);
 
-    // Status y=242
-    ui_WifiStatusLbl = make_status_lbl(ui_ScreenWifi, 244, "Non connesso");
+    // Status
+    ui_WifiStatusLbl = make_status_lbl(ui_ScreenWifi, 240, LV_SYMBOL_CLOSE " Non connesso");
+    lv_obj_set_style_text_color(ui_WifiStatusLbl, COL_ERR, 0);
+}
 
-    // ----------------------------------------------------------------
-    //  WIFI_PWD — schermata password (480×272)
-    //  Header   y=0..31   h=32
-    //  Label    y=34
-    //  TextArea y=50..90  h=38 w=472
-    //  Tastiera y=92..212 h=120 w=480
-    //  Pulsanti y=214..239 h=26
-    //  Status   y=244
-    // ----------------------------------------------------------------
+// ================================================================
+//  BUILD — WIFI_PWD (480×272)
+// ================================================================
+void ui_build_wifi_pwd(void) {
     ui_ScreenWifiPwd = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(ui_ScreenWifiPwd, COL_DARK, 0);
     lv_obj_set_style_bg_opa(ui_ScreenWifiPwd, LV_OPA_COVER, 0);
     lv_obj_clear_flag(ui_ScreenWifiPwd, LV_OBJ_FLAG_SCROLLABLE);
 
     // Header
-    lv_obj_t* phdr = lv_obj_create(ui_ScreenWifiPwd);
-    lv_obj_set_pos(phdr, 0, 0);
-    lv_obj_set_size(phdr, 480, 32);
-    lv_obj_set_style_bg_color(phdr, COL_WIFI, 0);
-    lv_obj_set_style_bg_opa(phdr, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(phdr, 0, 0);
-    lv_obj_set_style_radius(phdr, 0, 0);
-    lv_obj_set_style_pad_all(phdr, 0, 0);
-    lv_obj_clear_flag(phdr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* hdr = lv_obj_create(ui_ScreenWifiPwd);
+    lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, 32);
+    lv_obj_set_style_bg_color(hdr, COL_WIFI, 0);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_radius(hdr, 0, 0);
+    lv_obj_set_style_pad_all(hdr, 0, 0);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* hdr_lbl = lv_label_create(hdr);
+    lv_label_set_text(hdr_lbl, LV_SYMBOL_WIFI "  PASSWORD RETE");
+    lv_obj_set_style_text_font(hdr_lbl, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(hdr_lbl, lv_color_black(), 0);
+    lv_obj_align(hdr_lbl, LV_ALIGN_CENTER, 0, 0);
 
-    ui_WifiPwdSsidLbl = lv_label_create(phdr);
-    lv_label_set_text(ui_WifiPwdSsidLbl, LV_SYMBOL_WIFI "  Password");
-    lv_obj_set_style_text_font(ui_WifiPwdSsidLbl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(ui_WifiPwdSsidLbl, lv_color_black(), 0);
-    lv_obj_align(ui_WifiPwdSsidLbl, LV_ALIGN_CENTER, 0, 0);
+    // SSID selezionato
+    ui_WifiPwdSsidLbl = lv_label_create(ui_ScreenWifiPwd);
+    lv_label_set_text(ui_WifiPwdSsidLbl, "");
+    lv_obj_set_style_text_font(ui_WifiPwdSsidLbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ui_WifiPwdSsidLbl, COL_WIFI, 0);
+    lv_obj_set_pos(ui_WifiPwdSsidLbl, 4, 34);
 
-    lv_obj_t* pwd_lbl = lv_label_create(ui_ScreenWifiPwd);
-    lv_label_set_text(pwd_lbl, "Password:");
-    lv_obj_set_style_text_font(pwd_lbl, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(pwd_lbl, COL_GRAY, 0);
-    lv_obj_set_pos(pwd_lbl, 6, 34);
-
-    // TextArea password — larghezza 472
+    // TextArea password
     ui_WifiPwdTA = lv_textarea_create(ui_ScreenWifiPwd);
-    lv_obj_set_pos(ui_WifiPwdTA, 4, 50);
-    lv_obj_set_size(ui_WifiPwdTA, 472, 38);
+    lv_obj_set_pos(ui_WifiPwdTA, 4, 52); lv_obj_set_size(ui_WifiPwdTA, 472, 36);
     lv_textarea_set_password_mode(ui_WifiPwdTA, true);
     lv_textarea_set_max_length(ui_WifiPwdTA, 63);
     lv_textarea_set_one_line(ui_WifiPwdTA, true);
-    lv_textarea_set_placeholder_text(ui_WifiPwdTA, "Inserisci password WiFi...");
+    lv_textarea_set_placeholder_text(ui_WifiPwdTA, "Password WiFi");
     lv_obj_set_style_bg_color(ui_WifiPwdTA, COL_DGRAY, 0);
     lv_obj_set_style_bg_opa(ui_WifiPwdTA, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(ui_WifiPwdTA, COL_WHITE, 0);
-    lv_obj_set_style_text_font(ui_WifiPwdTA, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(ui_WifiPwdTA, &lv_font_montserrat_14, 0);
     lv_obj_set_style_border_color(ui_WifiPwdTA, COL_WIFI, 0);
     lv_obj_set_style_border_width(ui_WifiPwdTA, 2, 0);
 
-    // Tastiera LVGL — y=90 h=122 w=480
+    // Tastiera
     ui_WifiKbd = lv_keyboard_create(ui_ScreenWifiPwd);
-    lv_obj_set_pos(ui_WifiKbd, 0, 90);
-    lv_obj_set_size(ui_WifiKbd, 480, 122);
+    lv_obj_set_pos(ui_WifiKbd, 0, 92); lv_obj_set_size(ui_WifiKbd, 480, 120);
     lv_keyboard_set_mode(ui_WifiKbd, LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_keyboard_set_textarea(ui_WifiKbd, ui_WifiPwdTA);
-    lv_obj_set_style_bg_color(ui_WifiKbd, lv_color_make(0x1A, 0x1A, 0x2A), 0);
+    lv_obj_set_style_bg_color(ui_WifiKbd, lv_color_make(0x1A,0x1A,0x2A), 0);
     lv_obj_set_style_bg_opa(ui_WifiKbd, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(ui_WifiKbd, COL_WHITE, 0);
-    lv_obj_add_event_cb(ui_WifiKbd, cb_wifi_pwd_kbd, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(ui_WifiKbd, cb_wifi_pwd_kbd, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(ui_WifiKbd, cb_wifi_pwd_kbd, LV_EVENT_CANCEL, NULL);
 
-    // Pulsanti y=214 h=26
+    // Pulsanti
     ui_BtnWifiConnect = make_action_btn(ui_ScreenWifiPwd,
         2, 214, 236, 26, LV_SYMBOL_OK " CONNETTI", COL_OK, cb_wifi_connect_btn);
     ui_BtnWifiCancel = make_action_btn(ui_ScreenWifiPwd,
@@ -279,12 +265,12 @@ void ui_build_wifi(void) {
 //  Header   y=0..31   h=32
 //  Label    y=34
 //  TextArea y=50..90  h=38 w=472
-//  Tastiera y=92..192 h=100 w=480 (SPECIAL mode URL)
-//  Bar      y=194..214 h=20 w=380
-//  BarLbl   x=386      y=194
+//  Tastiera y=92..192 h=100 w=480
+//  Bar      y=194..214 h=20 w=400
+//  BarLbl   x=408      y=196
 //  Sep      y=216      h=2
-//  Azioni   y=218..243 h=26 — AVVIA(236)|INDIETRO(236)
-//  Status   y=246
+//  Azioni   y=218..243 h=26
+//  Status   y=248
 // ================================================================
 void ui_build_ota(void) {
     ui_ScreenOta = lv_obj_create(NULL);
@@ -294,8 +280,7 @@ void ui_build_ota(void) {
 
     // Header
     lv_obj_t* hdr = lv_obj_create(ui_ScreenOta);
-    lv_obj_set_pos(hdr, 0, 0);
-    lv_obj_set_size(hdr, 480, 32);
+    lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, 32);
     lv_obj_set_style_bg_color(hdr, COL_OTA, 0);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(hdr, 0, 0);
@@ -315,10 +300,9 @@ void ui_build_ota(void) {
     lv_obj_set_style_text_color(url_lbl, COL_GRAY, 0);
     lv_obj_set_pos(url_lbl, 6, 34);
 
-    // TextArea URL w=472
+    // TextArea URL
     ui_OtaUrlTA = lv_textarea_create(ui_ScreenOta);
-    lv_obj_set_pos(ui_OtaUrlTA, 4, 50);
-    lv_obj_set_size(ui_OtaUrlTA, 472, 38);
+    lv_obj_set_pos(ui_OtaUrlTA, 4, 50); lv_obj_set_size(ui_OtaUrlTA, 472, 38);
     lv_textarea_set_max_length(ui_OtaUrlTA, 255);
     lv_textarea_set_one_line(ui_OtaUrlTA, true);
     lv_textarea_set_placeholder_text(ui_OtaUrlTA, "http://192.168.1.x/firmware.bin");
@@ -330,27 +314,25 @@ void ui_build_ota(void) {
     lv_obj_set_style_border_width(ui_OtaUrlTA, 2, 0);
     if (g_ota_url[0]) lv_textarea_set_text(ui_OtaUrlTA, g_ota_url);
 
-    // Tastiera URL — y=90 h=100 w=480 SPECIAL
+    // Tastiera URL
     ui_OtaKbd = lv_keyboard_create(ui_ScreenOta);
-    lv_obj_set_pos(ui_OtaKbd, 0, 90);
-    lv_obj_set_size(ui_OtaKbd, 480, 100);
+    lv_obj_set_pos(ui_OtaKbd, 0, 90); lv_obj_set_size(ui_OtaKbd, 480, 100);
     lv_keyboard_set_mode(ui_OtaKbd, LV_KEYBOARD_MODE_SPECIAL);
     lv_keyboard_set_textarea(ui_OtaKbd, ui_OtaUrlTA);
-    lv_obj_set_style_bg_color(ui_OtaKbd, lv_color_make(0x1A, 0x1A, 0x2A), 0);
+    lv_obj_set_style_bg_color(ui_OtaKbd, lv_color_make(0x1A,0x1A,0x2A), 0);
     lv_obj_set_style_bg_opa(ui_OtaKbd, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(ui_OtaKbd, COL_WHITE, 0);
     lv_obj_add_event_cb(ui_OtaKbd, cb_ota_kbd, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(ui_OtaKbd, cb_ota_kbd, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(ui_OtaKbd, cb_ota_kbd, LV_EVENT_CANCEL, NULL);
 
-    // Barra progresso y=194 h=20 w=400
+    // Barra progresso OTA
     ui_OtaBar = lv_bar_create(ui_ScreenOta);
-    lv_obj_set_pos(ui_OtaBar, 4, 194);
-    lv_obj_set_size(ui_OtaBar, 400, 20);
+    lv_obj_set_pos(ui_OtaBar, 4, 194); lv_obj_set_size(ui_OtaBar, 400, 20);
     lv_bar_set_range(ui_OtaBar, 0, 100);
     lv_bar_set_value(ui_OtaBar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(ui_OtaBar, COL_DGRAY, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(ui_OtaBar, COL_OTA, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(ui_OtaBar, COL_OTA,   LV_PART_INDICATOR);
     lv_obj_set_style_radius(ui_OtaBar, 5, LV_PART_MAIN);
     lv_obj_set_style_radius(ui_OtaBar, 5, LV_PART_INDICATOR);
 
@@ -360,16 +342,15 @@ void ui_build_ota(void) {
     lv_obj_set_style_text_color(ui_OtaBarLbl, COL_WHITE, 0);
     lv_obj_set_pos(ui_OtaBarLbl, 410, 196);
 
-    // Sep y=216
+    // Separatore
     lv_obj_t* sep = lv_obj_create(ui_ScreenOta);
-    lv_obj_set_pos(sep, 0, 216);
-    lv_obj_set_size(sep, 480, 2);
+    lv_obj_set_pos(sep, 0, 216); lv_obj_set_size(sep, 480, 2);
     lv_obj_set_style_bg_color(sep, COL_OTA, 0);
     lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(sep, 0, 0);
     lv_obj_set_style_radius(sep, 0, 0);
 
-    // Pulsanti y=218 h=26
+    // Pulsanti
     ui_BtnOtaStart = make_action_btn(ui_ScreenOta,
         2, 218, 236, 26, LV_SYMBOL_UPLOAD " AVVIA OTA", COL_OTA, cb_ota_start_btn);
     ui_BtnOtaBack  = make_action_btn(ui_ScreenOta,
@@ -390,14 +371,11 @@ void ui_show_wifi_scan(void) {
 void ui_show_wifi_pwd(const char* ssid) {
     strncpy(g_wifi_selected_ssid, ssid, 32);
     g_wifi_selected_ssid[32] = '\0';
-
     char buf[64];
     snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI "  %s", ssid);
     lv_label_set_text(ui_WifiPwdSsidLbl, buf);
-
     lv_textarea_set_text(ui_WifiPwdTA, "");
     lv_label_set_text(ui_WifiPwdStatusLbl, "");
-
     lv_scr_load_anim(ui_ScreenWifiPwd, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
 }
 
@@ -422,19 +400,17 @@ void ui_wifi_update_list(void) {
         lv_list_add_text(ui_WifiList, "Nessuna rete trovata");
         return;
     }
-
     for (int i = 0; i < n && i < WIFI_SCAN_MAX; i++) {
         char row[48];
         snprintf(row, sizeof(row), "%s %s%s",
             rssi_symbol(g_wifi_nets[i].rssi),
             g_wifi_nets[i].ssid,
             g_wifi_nets[i].secure ? " " LV_SYMBOL_CLOSE : "");
-
         lv_obj_t* btn = lv_list_add_btn(ui_WifiList, NULL, row);
-        lv_obj_set_style_bg_color(btn, lv_color_make(0x1C, 0x1C, 0x2C), 0);
+        lv_obj_set_style_bg_color(btn, lv_color_make(0x1C,0x1C,0x2C), 0);
         lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
         lv_obj_set_style_text_color(btn, COL_WHITE, LV_PART_MAIN);
-        lv_obj_set_style_border_color(btn, lv_color_make(0x30, 0x30, 0x50), 0);
+        lv_obj_set_style_border_color(btn, lv_color_make(0x30,0x30,0x50), 0);
         lv_obj_set_style_border_width(btn, 1, 0);
         lv_obj_set_style_text_font(btn, &lv_font_montserrat_14, 0);
         lv_obj_set_height(btn, 24);
@@ -462,28 +438,36 @@ void ui_wifi_update_status(void) {
 }
 
 // ================================================================
-//  AGGIORNAMENTO BARRA OTA
+//  AGGIORNAMENTO BARRA OTA — ANIMAZIONE 13 (v22)
+//  Sostituisce il vecchio LV_ANIM_OFF con anim_ota_bar_update()
+//  che usa LV_ANIM_ON + micro-pulse sulla label percentuale.
 // ================================================================
 void ui_ota_update_progress(void) {
     if (!ui_OtaBar) return;
     int p = g_ota_progress;
+
     if (p < 0) {
+        // Errore: barra rossa, niente animazione
         lv_bar_set_value(ui_OtaBar, 0, LV_ANIM_OFF);
+        lv_anim_del(ui_OtaBarLbl, NULL);    // ferma eventuale pulse
+        lv_obj_set_style_opa(ui_OtaBarLbl, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(ui_OtaBar, COL_ERR, LV_PART_INDICATOR);
         lv_label_set_text(ui_OtaBarLbl, "ERR");
         lv_label_set_text(ui_OtaStatusLbl, g_ota_status_msg);
         lv_obj_set_style_text_color(ui_OtaStatusLbl, COL_ERR, 0);
     } else {
-        lv_bar_set_value(ui_OtaBar, p, LV_ANIM_OFF);
+        // ← ANIMAZIONE 13: barra fluida + micro-pulse label percentuale
         lv_obj_set_style_bg_color(ui_OtaBar,
             p == 100 ? COL_OK : COL_OTA, LV_PART_INDICATOR);
         char pct[8];
         snprintf(pct, sizeof(pct), "%d%%", p);
         lv_label_set_text(ui_OtaBarLbl, pct);
+        anim_ota_bar_update(ui_OtaBar, ui_OtaBarLbl, p);   // ← NUOVA CHIAMATA
         lv_label_set_text(ui_OtaStatusLbl, g_ota_status_msg);
         lv_obj_set_style_text_color(ui_OtaStatusLbl,
             p == 100 ? COL_OK : COL_GRAY, 0);
     }
+
     if (ui_BtnOtaStart) {
         if (g_ota_running) lv_obj_add_state(ui_BtnOtaStart, LV_STATE_DISABLED);
         else               lv_obj_clear_state(ui_BtnOtaStart, LV_STATE_DISABLED);
@@ -525,7 +509,7 @@ static void cb_wifi_net_selected(lv_event_t* e) {
 // ================================================================
 static void cb_wifi_pwd_kbd(lv_event_t* e) {
     lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_READY)  cb_wifi_connect_btn(NULL);
+    if (code == LV_EVENT_READY)   cb_wifi_connect_btn(NULL);
     else if (code == LV_EVENT_CANCEL) ui_show_wifi_scan();
 }
 
@@ -540,9 +524,9 @@ static void cb_wifi_connect_btn(lv_event_t* e) {
     wifi_request_connect(g_wifi_selected_ssid, pass);
     lv_label_set_text(ui_WifiPwdStatusLbl, "Connessione in corso...");
     lv_obj_set_style_text_color(ui_WifiPwdStatusLbl, COL_YELLOW, 0);
-    lv_timer_t* t = lv_timer_create([](lv_timer_t* t) {
+    lv_timer_t* t = lv_timer_create([](lv_timer_t* tmr) {
         ui_show_wifi_scan();
-        lv_timer_del(t);
+        lv_timer_del(tmr);
     }, 1200, NULL);
     (void)t;
 }
@@ -556,9 +540,8 @@ static void cb_wifi_cancel_btn(lv_event_t* e) {
 // ================================================================
 static void cb_ota_kbd(lv_event_t* e) {
     lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL)
         lv_obj_clear_state(ui_OtaUrlTA, LV_STATE_FOCUSED);
-    }
 }
 
 static void cb_ota_start_btn(lv_event_t* e) {
@@ -570,8 +553,7 @@ static void cb_ota_start_btn(lv_event_t* e) {
         lv_obj_set_style_text_color(ui_OtaStatusLbl, COL_ERR, 0);
         return;
     }
-    strncpy(g_ota_url, url, 255);
-    g_ota_url[255] = '\0';
+    strncpy(g_ota_url, url, 255); g_ota_url[255] = '\0';
     g_ota_progress      = 0;
     g_ota_start_request = true;
     strncpy(g_ota_status_msg, "Avvio OTA...", sizeof(g_ota_status_msg));

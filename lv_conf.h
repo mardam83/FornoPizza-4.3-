@@ -115,7 +115,7 @@
 #define LV_USE_METER          0
 #define LV_USE_MSGBOX         0
 #define LV_USE_SPINBOX        0
-#define LV_USE_SPINNER        0
+#define LV_USE_SPINNER        1
 #define LV_USE_TABVIEW        0
 #define LV_USE_TILEVIEW       0
 #define LV_USE_WIN            0
@@ -126,6 +126,7 @@
 #define LV_USE_KEYBOARD       1
 #define LV_USE_LIST           1
 #define LV_USE_MENU           1
+#define LV_USE_TRANSFORM       1
 
 /*==========================
    Tema scuro
