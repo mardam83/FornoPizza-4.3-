@@ -86,7 +86,7 @@ volatile bool        g_emergency_shutdown = false;
 //  STATO APPLICAZIONE (SRAM interna — accesso real-time)
 // ================================================================
 AppState    g_state = {};
-GraphBuffer g_graph = {nullptr, nullptr, 0, 0};
+extern GraphBuffer g_graph;
 
 // ================================================================
 //  EMERGENCY SHUTDOWN

@@ -38,12 +38,12 @@
 
 // Task PID: lettura TC, calcolo PID, relay duty cycle
 // Disabilitare per debug display senza resistenze collegate
-#define TASK_PID_ENABLE       1
+#define TASK_PID_ENABLE       0
 
 // Task Watchdog: supervisione heartbeat Task_PID
 // ATTENZIONE: disabilitare solo in debug — in produzione DEVE essere 1
 // Se TASK_PID_ENABLE=0 questo deve essere 0 (altrimenti WDG timeout immediato)
-#define TASK_WDG_ENABLE       1
+#define TASK_WDG_ENABLE       0
 
 // Task LVGL: rendering UI, refresh schermate
 // Disabilitare per debug PID puro via seriale
@@ -51,7 +51,7 @@
 
 // Task WiFi/MQTT: connessione, publish stato, ricezione comandi HA
 // Disabilitare per debug senza rete o per misurare impatto CPU
-#define TASK_WIFI_ENABLE      1
+#define TASK_WIFI_ENABLE      0
 
 // ================================================================
 //  FEATURE ENABLE
@@ -62,13 +62,13 @@
 
 // Safety system: overtemp, thermal runaway UP/DOWN
 // Disabilitare SOLO per test con resistori di carico, mai in produzione
-#define FEATURE_SAFETY        1
+#define FEATURE_SAFETY        0
 
 // Autotune PID via relay method (Brett Beauregard)
-#define FEATURE_AUTOTUNE      1
+#define FEATURE_AUTOTUNE      0
 
 // OTA via web browser (richiede TASK_WIFI_ENABLE=1)
-#define FEATURE_OTA           1
+#define FEATURE_OTA           0
 
 // ================================================================
 //  LOG SERIALE — livelli per modulo
@@ -86,7 +86,7 @@
 #define LOG_LEVEL_DEBUG  4
 
 // Log di sistema / avvio / memoria
-#define LOG_SYSTEM        LOG_LEVEL_INFO
+#define LOG_SYSTEM        LOG_LEVEL_DEBUG
 
 // Log Task_PID: temperatura, relay, PID output ogni ciclo
 // ATTENZIONE: LOG_LEVEL_DEBUG stampa ogni 500ms → può saturare il seriale
