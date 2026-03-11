@@ -1,46 +1,37 @@
 /**
  * ================================================================
- *  FORNO PIZZA CONTROLLER v10.0 — PORTING ESP32-S3
- *  Board  : ESP32-S3 (JC4827W543 o equivalente)
- *  Display: 4.3" ST7701S 480×272 (RGB parallel)
- *  Touch  : GT911 capacitivo (I2C)
- *  Libreria display: LovyanGFX (NON TFT_eSPI, NON Panel_ST7701S standalone)
+ *  FORNO PIZZA CONTROLLER v17.0 — ESP32-S3
+ *  Board  : ESP32-S3-WROOM-1-N16R8
+ *  Display: 4.3" ST7701A 480×272 (SPI 4-wire)
+ *  Touch  : CST820 capacitivo (I2C)
  *
- *  DIFFERENZE rispetto all'originale (ESP32-2432S028R / ILI9341 320×240):
- *    • Display driver: TFT_eSPI → LovyanGFX LGFX_JC4827W543
- *    • Touch: XPT2046 (SPI resistivo) → GT911 (I2C capacitivo)
- *    • Risoluzione LVGL: 320×240 → 480×272
- *    • Buffer LVGL ridimensionato: 480×25 pixel
- *    • Pin ESP32-S3: vedi sezione PIN
- *    • Backlight: controllato da LovyanGFX (niente TFT_BL_PIN manuale)
+ *  Per abilitare/disabilitare task, feature e log:
+ *    → modificare debug_config.h
  *
- *  FUNZIONALITÀ INVARIATE:
- *    • Dual-core: Core0=LVGL, Core1=PID+Watchdog
- *    • Safety system completo (overtemp, runaway UP/DOWN, WDG, TC error)
- *    • Ventola emergenza sempre ON in shutdown
- *    • PID dual/single, autotune, NVS, WiFi, MQTT, OTA
+ *  FIX v17 (da ESP32_CYD_LVGL_BugFix_Guide):
+ *  ─────────────────────────────────────────
+ *  [1] Oggetti hardware → puntatori (MAX6675, NVSStorage, PIDController)
+ *  [2] Doppia init LVGL rimossa — display_init() gestisce tutto
+ *  [3] TASK_LVGL_STACK: 8192 → 16384
+ *  [4] MUTEX_TIMEOUT_MS: 10 → 50
+ *  [5] Watchdog: vTaskDelay(2000) + g_pid_heartbeat=1 prima della creazione
+ *  [6] g_pid_heartbeat++ PRIMA di readCelsius()
+ *  [7] Splash: lv_scr_load_anim → lv_scr_load, LV_ANIM_OFF
+ *  [8] lv_conf.h: LV_ATTRIBUTE_FAST_MEM vuoto, LV_MEM_POOL_* commentate,
+ *                 LV_TXT_COLOR_CMD "#", LV_MEM_CUSTOM=1 PSRAM
  *
- *  COME INSTALLARE LovyanGFX:
- *    PlatformIO: lib_deps = lovyan03/LovyanGFX
- *    Arduino IDE: Library Manager → "LovyanGFX"
- *    NON serve un file User_Setup.h — la config è nel codice (vedi lgfx_setup)
- *
- *  TOUCH GT911:
- *    La libreria LovyanGFX gestisce GT911 internamente tramite il
- *    metodo getTouch(). Non serve libreria esterna.
+ *  MEMORIA:
+ *  ────────
+ *  Framebuffer LVGL:  double full FB 480×272 in PSRAM OPI (510 KB)
+ *  Oggetti UI LVGL:   heap PSRAM via LV_MEM_CUSTOM=1
+ *  GraphBuffer:       array base/cielo in PSRAM (~2.8 KB)
+ *  WiFi/PID/WDG task: stack in SRAM interna (richiesto da ISR/WiFi)
+ *  LVGL task:         stack in SRAM interna (16384 byte)
  * ================================================================
  */
 
-
 #include <Arduino.h>
 #include <SPI.h>
-
-// ── Display: tutto in LGFX_JC4827W543.h ─────────────────────────────
-// LGFX_USE_V1, #include <LovyanGFX.hpp>, classe LGFX e "lcd" sono
-// nel file .h — questo è il pattern degli esempi lgfx_user ufficiali
-// (vedi Arduino/libraries/LovyanGFX/src/lgfx_user/*.h)
-#include "LGFX_JC4827W543.h"
-
 #include <max6675.h>
 #include <PID_v1.h>
 #include <lvgl.h>
@@ -48,196 +39,84 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 
+// ── PRIMO include: tutte le #define di debug/task/log ───────────
+#include "debug_config.h"
+
+// ── Display + LVGL ──────────────────────────────────────────────
+#include "display_driver.h"
+
+// ── Core progetto ───────────────────────────────────────────────
+#include "hardware.h"
 #include "ui.h"
 #include "pid_ctrl.h"
 #include "nvs_storage.h"
-#include "hardware.h"
-#include "wifi_mqtt.h"
-#include "autotune.h"
-#include "ui_wifi.h"
-#include "ota_manager.h"
-#include "web_ota.h"
+#include "splash_screen.h"
 
+#if TASK_WIFI_ENABLE
+  #include "wifi_mqtt.h"
+  #include "ui_wifi.h"
+#endif
 
+#if FEATURE_AUTOTUNE
+  #include "autotune.h"
+#endif
 
-// ================================================================
-//  PIN — ESP32-S3
-//  Termocoppia MAX6675: SPI software (invariato come logica)
-//  Relay: mantieni gli stessi definiti in hardware.h
-// ================================================================
-// Backlight gestito da LovyanGFX — nessun TFT_BL_PIN manuale
-
-
-// ================================================================
-//  PARAMETRI SICUREZZA (invariati)
-// ================================================================
-#define TEMP_MAX_SAFE       480.0f
-#define FAN_OFF_TEMP        80.0f
-#define WDG_TIMEOUT_MS      5000
-#define WDG_CHECK_MS        500
-
-#define RUNAWAY_DOWN_ENABLED  1
-#define RUNAWAY_DOWN_MS       300000
-#define RUNAWAY_MIN_DROP      60.0f
-#define RUNAWAY_RECOVERY_DEG  15.0f
-
-#define RUNAWAY_UP_ENABLED    1
-#define RUNAWAY_RISE_DEG      40.0f
-#define RUNAWAY_RISE_MS       8000
-
-#define TC_READ_TIMEOUT_MS  2000
+#if FEATURE_OTA && TASK_WIFI_ENABLE
+  #include "ota_manager.h"
+  #include "web_ota.h"
+#endif
 
 // ================================================================
-//  TASK CONFIG (invariati)
+//  OGGETTI HARDWARE — puntatori (FIX: no costruttori globali)
 // ================================================================
-#define TASK_LVGL_CORE      0
-#define TASK_LVGL_PRIO      1
-#define TASK_LVGL_STACK     8192
-
-#define TASK_PID_CORE       1
-#define TASK_PID_PRIO       2
-#define TASK_PID_STACK      4096
-
-#define TASK_WDG_CORE       1
-#define TASK_WDG_PRIO       3
-#define TASK_WDG_STACK      2048
-
-#define MUTEX_TIMEOUT_MS    10
-
-// ================================================================
-//  DISPLAY RESOLUTION
-// ================================================================
-#define DISP_W  480
-#define DISP_H  272
-
-// ================================================================
-//  HARDWARE
-// ================================================================
-// lcd è già dichiarato sopra come LGFX
-// NO XPT2046 — il touch è integrato in LGFX (GT911)
-MAX6675  tc_base (TC_SCK, TC_CS_BASE,  TC_MISO);
-MAX6675  tc_cielo(TC_SCK, TC_CS_CIELO, TC_MISO);
-NVSStorage nvs;
+static MAX6675*       tc_base  = nullptr;
+static MAX6675*       tc_cielo = nullptr;
+static NVSStorage*    nvs      = nullptr;
+static PIDController* pid_base  = nullptr;
+static PIDController* pid_cielo = nullptr;
 
 // ================================================================
 //  SINCRONIZZAZIONE
 // ================================================================
-SemaphoreHandle_t g_mutex = nullptr;
-#define MUTEX_TAKE()  (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE)
-#define MUTEX_GIVE()   xSemaphoreGive(g_mutex)
-
-volatile uint32_t g_pid_heartbeat    = 0;
-volatile bool     g_emergency_shutdown = false;
+SemaphoreHandle_t    g_mutex              = nullptr;
+volatile uint32_t    g_pid_heartbeat      = 0;
+volatile bool        g_emergency_shutdown = false;
 
 // ================================================================
-//  STATO GLOBALE (invariato)
+//  STATO APPLICAZIONE (SRAM interna — accesso real-time)
 // ================================================================
-AppState g_state = {
-  .temp_base     = 0.0,
-  .temp_cielo    = 0.0,
-  .set_base      = 250.0,
-  .set_cielo     = 300.0,
-  .pid_out_base  = 0.0,
-  .pid_out_cielo = 0.0,
-  .kp_base       = 3.0,  .ki_base  = 0.02, .kd_base  = 2.0,
-  .kp_cielo      = 2.5,  .ki_cielo = 0.03, .kd_cielo = 1.5,
-  .sensor_mode   = SensorMode::SINGLE,
-  .pct_base      = 100,
-  .pct_cielo     = 100,
-  .base_enabled  = false,
-  .cielo_enabled = false,
-  .luce_on       = false,
-  .relay_base    = false,
-  .relay_cielo   = false,
-  .fan_on        = false,
-  .preheat_base  = false,
-  .preheat_cielo = false,
-  .tc_base_err   = false,
-  .tc_cielo_err  = false,
-  .safety_shutdown = false,
-  .safety_reason   = SafetyReason::NONE,
-  .autotune_status = AutotuneStatus::IDLE,
-  .autotune_split  = 50,
-  .autotune_cycles = 0,
-  .autotune_kp     = 0.0f,
-  .autotune_ki     = 0.0f,
-  .autotune_kd     = 0.0f,
-  .active_screen = Screen::MAIN,
-  .nvs_dirty     = false,
-};
+AppState    g_state = {};
+GraphBuffer g_graph = {nullptr, nullptr, 0, 0};
 
 // ================================================================
-//  PID (invariato)
-// ================================================================
-PIDController pid_base (&g_state.temp_base,  &g_state.pid_out_base,
-                         &g_state.set_base,
-                         g_state.kp_base, g_state.ki_base, g_state.kd_base);
-PIDController pid_cielo(&g_state.temp_cielo, &g_state.pid_out_cielo,
-                         &g_state.set_cielo,
-                         g_state.kp_cielo, g_state.ki_cielo, g_state.kd_cielo);
-
-// ================================================================
-//  BUFFER LVGL — adattato a 480×272
-// ================================================================
-static lv_disp_draw_buf_t draw_buf;
-static lv_color_t         lb1[DISP_W * 25];
-static lv_color_t         lb2[DISP_W * 25];
-
-// ================================================================
-//  EMERGENCY SHUTDOWN (invariato)
+//  EMERGENCY SHUTDOWN
 // ================================================================
 void IRAM_ATTR emergency_shutdown(SafetyReason reason) {
   RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  false);
   RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, false);
 
-  g_emergency_shutdown     = true;
-  g_state.relay_base       = false;
-  g_state.relay_cielo      = false;
-  g_state.base_enabled     = false;
-  g_state.cielo_enabled    = false;
-  g_state.safety_shutdown  = true;
-  g_state.safety_reason    = reason;
+  g_emergency_shutdown    = true;
+  g_state.relay_base      = false;
+  g_state.relay_cielo     = false;
+  g_state.base_enabled    = false;
+  g_state.cielo_enabled   = false;
+  g_state.safety_shutdown = true;
+  g_state.safety_reason   = reason;
 
   const char* reasons[] = {
-    "NONE", "TC_ERROR", "OVERTEMP", "RUNAWAY_DOWN",
-    "RUNAWAY_UP", "WDG_TIMEOUT"
+    "NONE","TC_ERROR","OVERTEMP","RUNAWAY_DOWN","RUNAWAY_UP","WDG_TIMEOUT"
   };
   int idx = (int)reason;
-  if (idx >= 0 && idx <= 5)
-    Serial.printf("\n!!! SHUTDOWN SICUREZZA: %s !!!\n", reasons[idx]);
+  LOG_E(LOG_SAFETY, "!!! SHUTDOWN SICUREZZA: %s !!!\n",
+        (idx >= 0 && idx <= 5) ? reasons[idx] : "?");
 }
 
 // ================================================================
-//  LVGL CALLBACKS — aggiornati per LovyanGFX e 480×272
-// ================================================================
-static void lvgl_flush(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* px) {
-  uint32_t w = area->x2 - area->x1 + 1;
-  uint32_t h = area->y2 - area->y1 + 1;
-  lcd.startWrite();
-  lcd.setAddrWindow(area->x1, area->y1, w, h);
-  lcd.writePixels((lgfx::rgb565_t*)px, w * h);
-  lcd.endWrite();
-  lv_disp_flush_ready(drv);
-}
-
-static void lvgl_touch(lv_indev_drv_t* drv, lv_indev_data_t* data) {
-  uint16_t tx, ty;
-  // getTouch() restituisce true se c'è un tocco valido
-  if (lcd.getTouch(&tx, &ty)) {
-    data->point.x = (lv_coord_t)tx;
-    data->point.y = (lv_coord_t)ty;
-    data->state   = LV_INDEV_STATE_PRESSED;
-  } else {
-    data->state = LV_INDEV_STATE_RELEASED;
-  }
-}
-
-// ================================================================
-//  NVS helpers (invariati)
+//  NVS HELPERS
 // ================================================================
 static void nvs_load_to_state() {
   NVSData d;
-  nvs.load(d);
+  nvs->load(d);
   g_state.set_base    = d.set_base;
   g_state.set_cielo   = d.set_cielo;
   g_state.kp_base     = d.kp_base;
@@ -264,18 +143,22 @@ static void nvs_save_from_state() {
   d.kd_cielo    = (float)g_state.kd_cielo;
   d.single_mode = (g_state.sensor_mode == SensorMode::SINGLE) ? 1 : 0;
   d.pct_base    = g_state.pct_base;
-  d.pct_cielo   = d.pct_cielo;
+  d.pct_cielo   = g_state.pct_cielo;
   g_state.nvs_dirty = false;
   MUTEX_GIVE();
-  nvs.save(d);
+  nvs->save(d);
 }
 
 // ================================================================
-//  TASK_WATCHDOG — invariato
+//  TASK_WATCHDOG
 // ================================================================
+#if TASK_WDG_ENABLE
 static void Task_Watchdog(void* param) {
-  Serial.printf("[Core %d] Task_Watchdog avviato (timeout=%dms)\n",
-                xPortGetCoreID(), WDG_TIMEOUT_MS);
+  LOG_I(LOG_WDG, "[Core %d] Task_Watchdog avviato (timeout=%dms)\n",
+        xPortGetCoreID(), WDG_TIMEOUT_MS);
+
+  // FIX: attendi 2s — Task_PID deve fare almeno un ciclo
+  vTaskDelay(pdMS_TO_TICKS(2000));
 
   uint32_t last_heartbeat = g_pid_heartbeat;
   uint32_t last_beat_time = millis();
@@ -293,37 +176,39 @@ static void Task_Watchdog(void* param) {
     uint32_t hb  = g_pid_heartbeat;
 
     if (hb != last_heartbeat) {
+      LOG_D(LOG_WDG, "[WDG] heartbeat ok hb=%lu\n", (unsigned long)hb);
       last_heartbeat = hb;
       last_beat_time = now;
     } else {
-      if (now - last_beat_time >= WDG_TIMEOUT_MS) {
-        Serial.printf("[WDG] TIMEOUT! PID heartbeat fermo da %lums\n",
-                      now - last_beat_time);
+      uint32_t stall = now - last_beat_time;
+      if (stall >= WDG_TIMEOUT_MS) {
+        LOG_E(LOG_WDG, "[WDG] TIMEOUT! PID heartbeat fermo da %lums\n",
+              (unsigned long)stall);
         emergency_shutdown(SafetyReason::WDG_TIMEOUT);
+      } else {
+        LOG_D(LOG_WDG, "[WDG] stall %lu/%dms\n",
+              (unsigned long)stall, WDG_TIMEOUT_MS);
       }
     }
   }
 }
+#endif // TASK_WDG_ENABLE
 
 // ================================================================
-//  TASK_PID — invariato (copia esatta dell'originale)
+//  TASK_PID
 // ================================================================
+#if TASK_PID_ENABLE
 static void Task_PID(void* param) {
-  Serial.printf("[Core %d] Task_PID avviato\n", xPortGetCoreID());
+  LOG_I(LOG_PID, "[Core %d] Task_PID avviato\n", xPortGetCoreID());
 
-  unsigned long win_base_single  = 0;
-  unsigned long win_cielo_single = 0;
-  uint32_t      last_nvs_ms      = millis();
-
-  float    rd_peak_temp       = -1.0f;
-  float    rd_valley_temp     = -1.0f;
-  uint32_t rd_drop_start_ms   = 0;
-  bool     rd_drop_active     = false;
-
-  float    ru_start_temp      = -1.0f;
-  uint32_t ru_start_ms        = 0;
+  unsigned long win_base  = 0;
+  unsigned long win_cielo = 0;
+  uint32_t      last_nvs_ms = millis();
 
   for (;;) {
+    // FIX: heartbeat PRIMA di tutto
+    g_pid_heartbeat++;
+
     uint32_t now = millis();
 
     if (g_emergency_shutdown) {
@@ -334,254 +219,134 @@ static void Task_PID(void* param) {
         g_state.fan_on = fan;
         RELAY_WRITE(RELAY_FAN, RELAY_FAN_INV, fan);
       }
-      g_pid_heartbeat++;
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
 
-    // ── 1. Lettura sensori ──
-    uint32_t t_read_start = millis();
-    float t_base_raw  = tc_base.readCelsius();
-    float t_cielo_raw = tc_cielo.readCelsius();
-    uint32_t t_read_ms = millis() - t_read_start;
+    // ── Lettura sensori ──
+    float t_cielo_raw = tc_cielo->readCelsius();
+    bool  err_cielo   = isnan(t_cielo_raw) || t_cielo_raw <= 0.0f;
+    float t_base_raw  = 0.0f;
+    bool  err_base    = false;
 
-    bool err_base  = isnan(t_base_raw)  || t_base_raw  <= 0.0f;
-    bool err_cielo = isnan(t_cielo_raw) || t_cielo_raw <= 0.0f;
-
-    if (t_read_ms > TC_READ_TIMEOUT_MS) {
-      Serial.printf("[PID] TC read timeout: %lums\n", t_read_ms);
-      emergency_shutdown(SafetyReason::TC_ERROR);
-      vTaskDelay(pdMS_TO_TICKS(PID_SAMPLE_MS));
-      continue;
+    if (g_state.sensor_mode == SensorMode::SINGLE) {
+      t_base_raw = t_cielo_raw;
+    } else {
+      t_base_raw = tc_base->readCelsius();
+      err_base   = isnan(t_base_raw) || t_base_raw <= 0.0f;
     }
 
-    // ── 2. Sicurezza ──
-    if (err_cielo && (g_state.base_enabled || g_state.cielo_enabled)) {
-      emergency_shutdown(SafetyReason::TC_ERROR);
-      vTaskDelay(pdMS_TO_TICKS(PID_SAMPLE_MS));
-      continue;
-    }
+    LOG_D(LOG_PID, "[PID] raw B=%.1f C=%.1f errB=%d errC=%d\n",
+          t_base_raw, t_cielo_raw, err_base, err_cielo);
 
-    if (!err_cielo) {
-      if (t_cielo_raw > TEMP_MAX_SAFE) {
-        Serial.printf("[PID] OVERTEMP: %.1f > %.1f\n", t_cielo_raw, TEMP_MAX_SAFE);
-        emergency_shutdown(SafetyReason::OVERTEMP);
-        vTaskDelay(pdMS_TO_TICKS(PID_SAMPLE_MS));
+    // ── Gestione errore TC ──
+    if (err_cielo) {
+#if FEATURE_SAFETY
+      if (g_state.sensor_mode == SensorMode::DUAL) {
+        emergency_shutdown(SafetyReason::TC_ERROR);
         continue;
       }
-
-      bool relay_on = g_state.relay_base || g_state.relay_cielo;
-
-#if RUNAWAY_DOWN_ENABLED
-      if (relay_on) {
-        if (rd_peak_temp < 0.0f) {
-          rd_peak_temp   = t_cielo_raw;
-          rd_valley_temp = t_cielo_raw;
-          rd_drop_active = false;
-        }
-        if (t_cielo_raw > rd_peak_temp) {
-          rd_peak_temp = t_cielo_raw;
-          if (rd_drop_active && (t_cielo_raw - rd_valley_temp) >= RUNAWAY_RECOVERY_DEG) {
-            rd_drop_active = false;
-            rd_valley_temp = t_cielo_raw;
-            Serial.printf("[PID] Runaway DOWN reset: temp risalita a %.1f\n", t_cielo_raw);
-          }
-        }
-        if (t_cielo_raw < rd_valley_temp)
-          rd_valley_temp = t_cielo_raw;
-        float total_drop = rd_peak_temp - rd_valley_temp;
-        if (total_drop >= RUNAWAY_MIN_DROP) {
-          if (!rd_drop_active) {
-            rd_drop_active   = true;
-            rd_drop_start_ms = now;
-            Serial.printf("[PID] Runaway DOWN iniziato: peak=%.1f valley=%.1f drop=%.1f°C\n",
-                          rd_peak_temp, rd_valley_temp, total_drop);
-          } else if (now - rd_drop_start_ms > RUNAWAY_DOWN_MS) {
-            Serial.printf("[PID] RUNAWAY DOWN: %.1f°C di discesa per %lums\n",
-                          total_drop, now - rd_drop_start_ms);
-            emergency_shutdown(SafetyReason::RUNAWAY_DOWN);
-            vTaskDelay(pdMS_TO_TICKS(PID_SAMPLE_MS));
-            continue;
-          }
-        }
-      } else {
-        rd_peak_temp   = -1.0f;
-        rd_valley_temp = -1.0f;
-        rd_drop_active = false;
-      }
 #endif
-
-#if RUNAWAY_UP_ENABLED
-      if (ru_start_temp < 0.0f) {
-        ru_start_temp = t_cielo_raw;
-        ru_start_ms   = now;
-      } else {
-        uint32_t elapsed = now - ru_start_ms;
-        if (elapsed >= RUNAWAY_RISE_MS) {
-          float rise = t_cielo_raw - ru_start_temp;
-          if (rise > RUNAWAY_RISE_DEG) {
-            Serial.printf("[PID] RUNAWAY UP: +%.1f°C in %lums\n", rise, elapsed);
-            emergency_shutdown(SafetyReason::RUNAWAY_UP);
-            vTaskDelay(pdMS_TO_TICKS(PID_SAMPLE_MS));
-            continue;
-          }
-          ru_start_temp = t_cielo_raw;
-          ru_start_ms   = now;
-        }
+      static uint32_t last_warn = 0;
+      if (now - last_warn > 5000) {
+        LOG_W(LOG_PID, "[PID] TC_CIELO ERR — open-loop\n");
+        last_warn = now;
       }
+      err_cielo = false;
+    }
+
+    if (err_base && g_state.sensor_mode == SensorMode::DUAL) {
+#if FEATURE_SAFETY
+      emergency_shutdown(SafetyReason::TC_ERROR);
+      continue;
 #endif
     }
 
-    // ── 3. Autotune / PID ──
+    // ── Aggiorna stato ──
+    if (MUTEX_TAKE()) {
+      if (!err_cielo) g_state.temp_cielo = (double)t_cielo_raw;
+      if (!err_base)  g_state.temp_base  = (double)t_base_raw;
+      g_state.tc_cielo_err = err_cielo;
+      g_state.tc_base_err  = err_base;
+      MUTEX_GIVE();
+    }
+
+    // ── Overtemp ──
+#if FEATURE_SAFETY
+    if (g_state.temp_cielo > TEMP_MAX_SAFE || g_state.temp_base > TEMP_MAX_SAFE) {
+      emergency_shutdown(SafetyReason::OVERTEMP);
+      continue;
+    }
+#endif
+
+    // ── PID + relay duty cycle ──
+    bool base_on  = false;
+    bool cielo_on = false;
+
+    if (g_state.base_enabled) {
+      pid_base->compute();
+      uint32_t on_time = (uint32_t)(g_state.pid_out_base / 100.0 * 2000.0);
+      on_time = constrain(on_time, 50u, 1950u);
+      if (millis() - win_base >= 2000) win_base = millis();
+      base_on = (millis() - win_base < on_time);
+      LOG_D(LOG_PID, "[PID] base out=%.1f on=%lu base_on=%d\n",
+            g_state.pid_out_base, (unsigned long)on_time, base_on);
+    }
+
+    if (g_state.cielo_enabled) {
+      pid_cielo->compute();
+      uint32_t on_time = (uint32_t)(g_state.pid_out_cielo / 100.0 * 2000.0);
+      on_time = constrain(on_time, 50u, 1950u);
+      if (millis() - win_cielo >= 2000) win_cielo = millis();
+      cielo_on = (millis() - win_cielo < on_time);
+    }
+
+    RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  base_on);
+    RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, cielo_on);
+
+    if (MUTEX_TAKE()) {
+      g_state.relay_base  = base_on;
+      g_state.relay_cielo = cielo_on;
+      bool fan = (g_state.temp_cielo > FAN_OFF_TEMP);
+      if (fan != g_state.fan_on) {
+        g_state.fan_on = fan;
+        RELAY_WRITE(RELAY_FAN, RELAY_FAN_INV, fan);
+      }
+      MUTEX_GIVE();
+    }
+
+#if FEATURE_AUTOTUNE
     if (autotune_is_running()) {
       autotune_run(t_cielo_raw, now);
-      if (MUTEX_TAKE()) {
-        g_state.tc_cielo_err = err_cielo;
-        if (!err_cielo) g_state.temp_cielo = (double)t_cielo_raw;
-        g_state.temp_base = g_state.temp_cielo;
-        MUTEX_GIVE();
-      }
-    } else {
-      if (MUTEX_TAKE()) {
-        g_state.tc_cielo_err = err_cielo;
-        if (!err_cielo) g_state.temp_cielo = (double)t_cielo_raw;
-
-        if (g_state.sensor_mode == SensorMode::DUAL) {
-          g_state.tc_base_err = err_base;
-          if (!err_base) g_state.temp_base = (double)t_base_raw;
-        } else {
-          g_state.tc_base_err = false;
-          g_state.temp_base   = g_state.temp_cielo;
-        }
-
-        pid_base.setTunings (g_state.kp_base,  g_state.ki_base,  g_state.kd_base);
-        pid_cielo.setTunings(g_state.kp_cielo, g_state.ki_cielo, g_state.kd_cielo);
-
-        if (g_state.sensor_mode == SensorMode::SINGLE) {
-          if (g_state.base_enabled && !g_state.tc_cielo_err)
-            pid_cielo.compute();
-          g_state.pid_out_base = g_state.pid_out_cielo;
-        } else {
-          if (g_state.base_enabled  && !g_state.tc_base_err)  pid_base.compute();
-          if (g_state.cielo_enabled && !g_state.tc_cielo_err) pid_cielo.compute();
-        }
-        MUTEX_GIVE();
-      }
-    }
-
-    // ── 4. Relay ──
-    if (!autotune_is_running()) {
-      if (g_state.sensor_mode == SensorMode::SINGLE) {
-        double t   = g_state.temp_cielo;
-        double sp  = g_state.set_cielo;
-        bool   en  = g_state.base_enabled;
-        bool   ph  = en && (t < sp - PREHEAT_MARGIN_DEG);
-        g_state.preheat_base  = ph;
-        g_state.preheat_cielo = ph;
-
-        if (ph) {
-          if (!g_state.relay_base)  { g_state.relay_base  = true; RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  true); }
-          if (!g_state.relay_cielo) { g_state.relay_cielo = true; RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, true); }
-          if (MUTEX_TAKE()) { g_state.pid_out_cielo = 100.0; g_state.pid_out_base = 100.0; MUTEX_GIVE(); }
-        } else {
-          pid_cielo.updateRelay(en, RELAY_BASE,  RELAY_BASE_INV,  g_state.relay_base,  g_state.pct_base);
-          pid_cielo.updateRelay(en, RELAY_CIELO, RELAY_CIELO_INV, g_state.relay_cielo, g_state.pct_cielo);
-        }
-      } else {
-        // BASE
-        {
-          double t  = g_state.temp_base;
-          double sp = g_state.set_base;
-          bool   en = g_state.base_enabled;
-          bool   ph = en && !g_state.tc_base_err && (t < sp - PREHEAT_MARGIN_DEG);
-          g_state.preheat_base = ph;
-          if (!en) {
-            if (g_state.relay_base) { g_state.relay_base = false; RELAY_WRITE(RELAY_BASE, RELAY_BASE_INV, false); }
-          } else if (ph) {
-            if (!g_state.relay_base) { g_state.relay_base = true; RELAY_WRITE(RELAY_BASE, RELAY_BASE_INV, true); }
-            if (MUTEX_TAKE()) { g_state.pid_out_base = 100.0; MUTEX_GIVE(); }
-          } else {
-            pid_base.updateRelay(en, RELAY_BASE, RELAY_BASE_INV, g_state.relay_base, g_state.pct_base);
-          }
-        }
-        // CIELO
-        {
-          double t  = g_state.temp_cielo;
-          double sp = g_state.set_cielo;
-          bool   en = g_state.cielo_enabled;
-          bool   ph = en && !g_state.tc_cielo_err && (t < sp - PREHEAT_MARGIN_DEG);
-          g_state.preheat_cielo = ph;
-          if (!en) {
-            if (g_state.relay_cielo) { g_state.relay_cielo = false; RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, false); }
-          } else if (ph) {
-            if (!g_state.relay_cielo) { g_state.relay_cielo = true; RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, true); }
-            if (MUTEX_TAKE()) { g_state.pid_out_cielo = 100.0; MUTEX_GIVE(); }
-          } else {
-            pid_cielo.updateRelay(en, RELAY_CIELO, RELAY_CIELO_INV, g_state.relay_cielo, g_state.pct_cielo);
-          }
-        }
-      }
-    }
-
-    // ── 5. Ventola ──
-    bool any_resistance_on = g_state.relay_base || g_state.relay_cielo
-                             || g_state.base_enabled || g_state.cielo_enabled;
-    bool fan_needed = any_resistance_on || (!err_cielo && t_cielo_raw > FAN_OFF_TEMP);
-    if (fan_needed != g_state.fan_on) {
-      g_state.fan_on = fan_needed;
-      RELAY_WRITE(RELAY_FAN, RELAY_FAN_INV, fan_needed);
-      Serial.printf("[PID] Ventola %s (T=%.1f)\n", fan_needed ? "ON" : "OFF", t_cielo_raw);
-    }
-
-    // ── 6. Luce ──
-#if AUTO_LUCE_WITH_HEAT
-    if (any_resistance_on && !g_state.luce_on) {
-      g_state.luce_on = true;
     }
 #endif
-    RELAY_WRITE(RELAY_LUCE, RELAY_LUCE_INV, g_state.luce_on);
 
-    // ── 7. NVS ──
-    if (g_state.nvs_dirty) {
-      if (now - last_nvs_ms >= 3000) nvs_save_from_state();
-    } else {
+    // ── NVS save periodico ──
+    if (g_state.nvs_dirty && (now - last_nvs_ms > 5000)) {
       last_nvs_ms = now;
+      nvs_save_from_state();
     }
 
-    // ── 8. Heartbeat ──
-    g_pid_heartbeat++;
-
-    // ── 9. Grafico ──
-    static uint32_t last_graph_ms = 0;
-    if (now - last_graph_ms >= (uint32_t)(GRAPH_SAMPLE_S * 1000)) {
-      last_graph_ms = now;
-      if (MUTEX_TAKE()) {
-        g_graph.base [g_graph.head] = (float)g_state.temp_base;
-        g_graph.cielo[g_graph.head] = (float)g_state.temp_cielo;
-        g_graph.head = (g_graph.head + 1) % GRAPH_BUF_SIZE;
-        if (g_graph.count < GRAPH_BUF_SIZE) g_graph.count++;
-        MUTEX_GIVE();
-      }
-    }
-
-    Serial.printf("[C1 %5.1fs] %s B:%5.1f/%.0f %3.0f%%%c C:%5.1f/%.0f %3.0f%%%c Fan:%c\n",
-      now / 1000.0,
+    // ── Log PID periodico ──
+    LOG_I(LOG_PID, "[C1 %5.1fs] %s B:%5.1f/%.0f %3.0f%%%c C:%5.1f/%.0f %3.0f%%%c\n",
+      millis() / 1000.0f,
       g_state.sensor_mode == SensorMode::SINGLE ? "SGL" : "DUA",
       g_state.temp_base,  g_state.set_base,  g_state.pid_out_base,
       g_state.relay_base  ? '*' : '.',
       g_state.temp_cielo, g_state.set_cielo, g_state.pid_out_cielo,
-      g_state.relay_cielo ? '*' : '.',
-      g_state.fan_on      ? 'V' : '-');
+      g_state.relay_cielo ? '*' : '.');
 
     vTaskDelay(pdMS_TO_TICKS(PID_SAMPLE_MS));
   }
 }
+#endif // TASK_PID_ENABLE
 
 // ================================================================
-//  TASK_LVGL — invariato (risoluzione aggiornata via DISP_W/H)
+//  TASK_LVGL
 // ================================================================
+#if TASK_LVGL_ENABLE
 static void Task_LVGL(void* param) {
-  Serial.printf("[Core %d] Task_LVGL avviato\n", xPortGetCoreID());
+  LOG_I(LOG_LVGL, "[Core %d] Task_LVGL avviato\n", xPortGetCoreID());
   uint32_t last_ui_ms = 0;
 
   for (;;) {
@@ -595,135 +360,217 @@ static void Task_LVGL(void* param) {
       if (MUTEX_TAKE()) {
         scr = g_state.active_screen;
         MUTEX_GIVE();
+
+        LOG_D(LOG_LVGL, "[LVGL] refresh screen=%d\n", (int)scr);
+
         switch (scr) {
-          case Screen::MAIN:      ui_refresh(&g_state);       break;
-          case Screen::TEMP:      ui_refresh_temp(&g_state);  break;
+          case Screen::MAIN:
+            if (ui_ScreenMain && lv_scr_act() == ui_ScreenMain)
+              ui_refresh(&g_state);
+            break;
+          case Screen::TEMP:
+            if (ui_ScreenTemp && lv_scr_act() == ui_ScreenTemp)
+              ui_refresh_temp(&g_state);
+            break;
           case Screen::PID_BASE:
-          case Screen::PID_CIELO: ui_refresh_pid(&g_state);   break;
-          case Screen::GRAPH:     ui_refresh_graph(&g_state); break;
+          case Screen::PID_CIELO:
+            ui_refresh_pid(&g_state);
+            break;
+          case Screen::GRAPH:
+            if (ui_ScreenGraph && lv_scr_act() == ui_ScreenGraph)
+              ui_refresh_graph(&g_state);
+            break;
+#if TASK_WIFI_ENABLE
           case Screen::WIFI_SCAN:
-              ui_wifi_update_list();
-              ui_wifi_update_status();
-              break;
+            ui_wifi_update_list();
+            ui_wifi_update_status();
+            break;
           case Screen::OTA:
-              ui_ota_update_progress();
-              break;
+            ui_ota_update_progress();
+            break;
           case Screen::WIFI_PWD:
-              break;
+            break;
+#endif
+          default:
+            break;
         }
       }
     }
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
+#endif // TASK_LVGL_ENABLE
 
 // ================================================================
 //  SETUP
 // ================================================================
 void setup() {
   Serial.begin(115200);
-  Serial.printf("\n=== FORNO PIZZA v15.0 — ESP32-S3 | ST7701S 480x272 | GT911 ===\n");
-  Serial.printf("setup() su Core %d\n", xPortGetCoreID());
+  LOG_I(LOG_SYSTEM, "\n=== FORNO PIZZA v17.0 — ESP32-S3 | ST7701A 480x272 ===\n");
+  LOG_I(LOG_SYSTEM, "Task: PID=%d WDG=%d LVGL=%d WiFi=%d\n",
+        TASK_PID_ENABLE, TASK_WDG_ENABLE, TASK_LVGL_ENABLE, TASK_WIFI_ENABLE);
+  LOG_I(LOG_SYSTEM, "Feature: Splash=%d Safety=%d Autotune=%d OTA=%d\n",
+        FEATURE_SPLASH, FEATURE_SAFETY, FEATURE_AUTOTUNE, FEATURE_OTA);
 
-  // Verifica se la PSRAM è stata inizializzata correttamente
-  if(psramInit()){
-    Serial.println("PSRAM inizializzata correttamente!");
-    Serial.printf("Totale PSRAM: %d byte\n", ESP.getPsramSize());
-    Serial.printf("PSRAM libera: %d byte\n", ESP.getFreePsram());
-  } else {
-    Serial.println("ERRORE: PSRAM non trovata o non inizializzata.");
-  }
-
-  // ---- Relay OFF come prima cosa assoluta ----
+  // ---- 1. Relay OFF ----
   RELAY_INIT(RELAY_BASE,  RELAY_BASE_INV);
   RELAY_INIT(RELAY_CIELO, RELAY_CIELO_INV);
   RELAY_INIT(RELAY_LUCE,  RELAY_LUCE_INV);
   RELAY_INIT(RELAY_FAN,   RELAY_FAN_INV);
 
-  // ---- Display (LovyanGFX gestisce anche backlight e touch init) ----
-  lcd.init();
-  lcd.setRotation(1);        // landscape
-  lcd.fillScreen(TFT_BLACK);
-  lcd.setBrightness(255);    // backlight al massimo
+  // ---- 2. Display + LVGL ----
+  display_init();
 
-  // ---- Mutex ----
+  // ---- 3. Splash ----
+#if FEATURE_SPLASH
+  splash_init();
+  splash_set_progress(5, "Inizializzazione...");
+#endif
+
+  // ---- 4. Mutex ----
   g_mutex = xSemaphoreCreateMutex();
   if (!g_mutex) {
-    Serial.println("ERRORE FATALE: mutex non creato!");
+    LOG_E(LOG_SYSTEM, "ERRORE FATALE: mutex non creato!\n");
     while (true) vTaskDelay(1000);
   }
+  LOG_I(LOG_SYSTEM, "[SETUP] Mutex OK\n");
+#if FEATURE_SPLASH
+  splash_set_progress(10, "Mutex OK");
+#endif
 
+  // ---- 5. GraphBuffer in PSRAM ----
+  graph_alloc_psram();
+#if FEATURE_SPLASH
+  splash_set_progress(15, "Graph PSRAM OK");
+#endif
+
+  // ---- 6. Oggetti hardware (DOPO lcd.init) ----
+  tc_base  = new MAX6675(TC_SCK, TC_CS_BASE,  TC_MISO);
+  tc_cielo = new MAX6675(TC_SCK, TC_CS_CIELO, TC_MISO);
+  nvs      = new NVSStorage();
+  LOG_I(LOG_SYSTEM, "[SETUP] MAX6675 + NVS allocati\n");
+#if FEATURE_SPLASH
+  splash_set_progress(20, "Sensori OK");
+#endif
+
+  // ---- 7. NVS ----
   nvs_load_to_state();
-  Serial.printf("NVS: mode=%s set=%.0f/%.0f split=%d/%d\n",
+  LOG_I(LOG_SYSTEM, "[SETUP] NVS: mode=%s set=%.0f/%.0f split=%d/%d\n",
     g_state.sensor_mode == SensorMode::SINGLE ? "SINGLE" : "DUAL",
     g_state.set_base, g_state.set_cielo,
     g_state.pct_base, g_state.pct_cielo);
+#if FEATURE_SPLASH
+  splash_set_progress(30, "NVS OK");
+#endif
 
-  // ---- LVGL ----
-  lv_init();
-  lv_disp_draw_buf_init(&draw_buf, lb1, lb2, DISP_W * 25);
-  static lv_disp_drv_t disp_drv;
-  lv_disp_drv_init(&disp_drv);
-  disp_drv.hor_res  = DISP_W;
-  disp_drv.ver_res  = DISP_H;
-  disp_drv.flush_cb = lvgl_flush;
-  disp_drv.draw_buf = &draw_buf;
-  lv_disp_drv_register(&disp_drv);
+  // ---- 8. PID — allocato DOPO nvs_load (usa Kp/Ki/Kd corretti) ----
+  pid_base  = new PIDController(&g_state.temp_base,  &g_state.pid_out_base,
+                                 &g_state.set_base,
+                                 g_state.kp_base,  g_state.ki_base,  g_state.kd_base);
+  pid_cielo = new PIDController(&g_state.temp_cielo, &g_state.pid_out_cielo,
+                                 &g_state.set_cielo,
+                                 g_state.kp_cielo, g_state.ki_cielo, g_state.kd_cielo);
+  pid_base->begin();
+  pid_cielo->begin();
+  LOG_I(LOG_SYSTEM, "[SETUP] PID OK (Kp=%.2f Ki=%.3f Kd=%.2f)\n",
+        g_state.kp_base, g_state.ki_base, g_state.kd_base);
+#if FEATURE_SPLASH
+  splash_set_progress(40, "PID OK");
+#endif
 
-  static lv_indev_drv_t indev_drv;
-  lv_indev_drv_init(&indev_drv);
-  indev_drv.type    = LV_INDEV_TYPE_POINTER;
-  indev_drv.read_cb = lvgl_touch;
-  lv_indev_drv_register(&indev_drv);
-
-  // ---- PID ----
-  pid_base.begin();
-  pid_base.setTunings(g_state.kp_base, g_state.ki_base, g_state.kd_base);
-  pid_cielo.begin();
-  pid_cielo.setTunings(g_state.kp_cielo, g_state.ki_cielo, g_state.kd_cielo);
-
-  // ---- Prima lettura sensori ----
+  // ---- 9. Prima lettura sensori ----
   delay(300);
-  float t2 = tc_cielo.readCelsius();
+  float t2 = tc_cielo->readCelsius();
   g_state.tc_cielo_err = isnan(t2) || t2 <= 0.0f;
   if (!g_state.tc_cielo_err) g_state.temp_cielo = (double)t2;
   if (g_state.sensor_mode == SensorMode::SINGLE) {
     g_state.tc_base_err = false;
     g_state.temp_base   = g_state.temp_cielo;
   } else {
-    float t1 = tc_base.readCelsius();
+    float t1 = tc_base->readCelsius();
     g_state.tc_base_err = isnan(t1) || t1 <= 0.0f;
     if (!g_state.tc_base_err) g_state.temp_base = (double)t1;
   }
+  LOG_I(LOG_SYSTEM, "[SETUP] Temp: B=%.1f°C  C=%.1f°C\n",
+        g_state.temp_base, g_state.temp_cielo);
+#if FEATURE_SPLASH
+  splash_set_progress(55, "Sensori OK");
+#endif
 
+  // ---- 10. UI ----
   ui_init();
   ui_refresh(&g_state);
+  LOG_I(LOG_SYSTEM, "[SETUP] UI OK\n");
+#if FEATURE_SPLASH
+  splash_set_progress(70, "UI pronta");
+#endif
 
-  // ---- WiFi + MQTT ----
+  // ---- 11. WiFi ----
+#if TASK_WIFI_ENABLE
   wifi_mqtt_init();
+  LOG_I(LOG_SYSTEM, "[SETUP] WiFi init OK\n");
+#else
+  LOG_W(LOG_SYSTEM, "[SETUP] WiFi DISABILITATO\n");
+#endif
+#if FEATURE_SPLASH
+  splash_set_progress(80, TASK_WIFI_ENABLE ? "WiFi OK" : "WiFi OFF");
+#endif
 
-  // ---- OTA ----
+  // ---- 12. OTA ----
+#if FEATURE_OTA && TASK_WIFI_ENABLE
   ota_manager_init();
   web_ota_init();
+  LOG_I(LOG_SYSTEM, "[SETUP] OTA OK\n");
+#else
+  LOG_W(LOG_SYSTEM, "[SETUP] OTA disabilitato\n");
+#endif
+#if FEATURE_SPLASH
+  splash_set_progress(90, "Pronto");
+#endif
 
-  // ---- Task ----
-  xTaskCreatePinnedToCore(Task_Watchdog, "Task_WDG",
-    TASK_WDG_STACK, nullptr, TASK_WDG_PRIO, nullptr, TASK_WDG_CORE);
-
+  // ---- 13. Task FreeRTOS ----
+  // FIX: g_pid_heartbeat=1 PRIMA di creare Task_Watchdog
   g_pid_heartbeat = 1;
 
-  xTaskCreatePinnedToCore(Task_PID,  "Task_PID",
-    TASK_PID_STACK, nullptr, TASK_PID_PRIO, nullptr, TASK_PID_CORE);
+#if TASK_WDG_ENABLE
+  xTaskCreatePinnedToCore(Task_Watchdog, "Task_WDG",
+    TASK_WDG_STACK, nullptr, TASK_WDG_PRIO, nullptr, TASK_WDG_CORE);
+  LOG_I(LOG_SYSTEM, "[SETUP] Task_WDG avviato\n");
+#else
+  LOG_W(LOG_SYSTEM, "[SETUP] Task_WDG DISABILITATO\n");
+#endif
 
+#if TASK_PID_ENABLE
+  xTaskCreatePinnedToCore(Task_PID, "Task_PID",
+    TASK_PID_STACK, nullptr, TASK_PID_PRIO, nullptr, TASK_PID_CORE);
+  LOG_I(LOG_SYSTEM, "[SETUP] Task_PID avviato\n");
+#else
+  LOG_W(LOG_SYSTEM, "[SETUP] Task_PID DISABILITATO — relay sempre OFF\n");
+#endif
+
+#if TASK_LVGL_ENABLE
   xTaskCreatePinnedToCore(Task_LVGL, "Task_LVGL",
     TASK_LVGL_STACK, nullptr, TASK_LVGL_PRIO, nullptr, TASK_LVGL_CORE);
+  LOG_I(LOG_SYSTEM, "[SETUP] Task_LVGL avviato (stack=%d)\n", TASK_LVGL_STACK);
+#else
+  LOG_W(LOG_SYSTEM, "[SETUP] Task_LVGL DISABILITATO\n");
+#endif
 
+#if TASK_WIFI_ENABLE
   xTaskCreatePinnedToCore(Task_WiFi, "Task_WiFi",
     TASK_WIFI_STACK, nullptr, TASK_WIFI_PRIO, nullptr, TASK_WIFI_CORE);
+  LOG_I(LOG_SYSTEM, "[SETUP] Task_WiFi avviato\n");
+#endif
 
-  Serial.printf("Safety: TEMP_MAX=%.0f FAN_OFF=%.0f WDG=%dms\n",
-    TEMP_MAX_SAFE, FAN_OFF_TEMP, WDG_TIMEOUT_MS);
-  Serial.println("Tutti i task avviati.");
+  LOG_I(LOG_SYSTEM, "[SETUP] Safety: TEMP_MAX=%.0f FAN_OFF=%.0f WDG=%dms\n",
+        TEMP_MAX_SAFE, FAN_OFF_TEMP, WDG_TIMEOUT_MS);
+
+  // ---- 14. Fine setup ----
+#if FEATURE_SPLASH
+  splash_finish(ui_ScreenMain);
+#endif
+
+  LOG_I(LOG_SYSTEM, "[SETUP] Avvio completato.\n");
 }
 
 void loop() {
