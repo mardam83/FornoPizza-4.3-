@@ -530,7 +530,7 @@ static void build_temp() {
     make_pm(pb, 114, 70, 108, 52, "-", UI_COL_ACCENT, cb_base_minus);
 
     lv_obj_t* sbl = lv_label_create(pb);
-    lv_label_set_text(sbl, "\xC2\xB1""5\xC2\xB0""C");
+    lv_label_set_text(sbl, "5\xC2\xB0""C");
     lv_obj_set_style_text_font(sbl, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(sbl, UI_COL_GRAY, 0);
     lv_obj_set_pos(sbl, 144, 126);
@@ -570,7 +570,7 @@ static void build_temp() {
     make_pm(pc, 114, 70, 120, 52, "-", UI_COL_CIELO, cb_cielo_minus);
 
     lv_obj_t* scl = lv_label_create(pc);
-    lv_label_set_text(scl, "\xC2\xB1""5\xC2\xB0""C");
+    lv_label_set_text(scl, "5\xC2\xB0""C");
     lv_obj_set_style_text_font(scl, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(scl, UI_COL_GRAY, 0);
     lv_obj_set_pos(scl, 148, 126);

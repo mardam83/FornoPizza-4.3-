@@ -361,8 +361,6 @@ static void Task_LVGL(void* param) {
         scr = g_state.active_screen;
         MUTEX_GIVE();
 
-        LOG_D(LOG_LVGL, "[LVGL] refresh screen=%d\n", (int)scr);
-
         switch (scr) {
           case Screen::MAIN:
             if (ui_ScreenMain && lv_scr_act() == ui_ScreenMain)
@@ -406,7 +404,21 @@ static void Task_LVGL(void* param) {
 // ================================================================
 void setup() {
   Serial.begin(115200);
-  LOG_I(LOG_SYSTEM, "\n=== FORNO PIZZA v17.0 — ESP32-S3 | ST7701A 480x272 ===\n");
+
+
+  // Attendi che il monitor seriale USB CDC sia pronto (fino a 3s).
+  // Su N4R8 con USB CDC il buffer non è disponibile immediatamente
+  // dopo il reset — senza questo delay display_init() stampa nel vuoto.
+  // Con UART0 hardware (non USB) ridurre a delay(100).
+  {
+    uint32_t t0 = millis();
+    while (!Serial && (millis() - t0 < 3000)) { delay(10); }
+    delay(200);
+  }
+  Serial.println("\n\n>>> SERIAL OK <<<");
+  Serial.flush();
+
+  LOG_I(LOG_SYSTEM, "\n=== FORNO PIZZA v17.0 — ESP32-S3 | NV3041A 480x272 ===\n");
   LOG_I(LOG_SYSTEM, "Task: PID=%d WDG=%d LVGL=%d WiFi=%d\n",
         TASK_PID_ENABLE, TASK_WDG_ENABLE, TASK_LVGL_ENABLE, TASK_WIFI_ENABLE);
   LOG_I(LOG_SYSTEM, "Feature: Splash=%d Safety=%d Autotune=%d OTA=%d\n",

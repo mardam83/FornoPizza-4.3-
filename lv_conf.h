@@ -49,6 +49,7 @@
 // Se i colori appaiono invertiti → cambia a 1
 #define LV_COLOR_16_SWAP  0
 
+#define LV_COLOR_SCREEN_TRANSP 1
 /*==========================
    Memoria LVGL heap
    FIX [4]: LV_MEM_CUSTOM=1 → alloca oggetti UI in PSRAM

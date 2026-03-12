@@ -52,28 +52,40 @@
 
 // ================================================================
 //  TOUCH — GT911  I2C
+//
+//  L'indirizzo I2C del GT911 dipende dal livello su INT durante reset:
+//    INT=LOW  durante reset  →  0x5D  (sequenza usata in gt911_init())
+//    INT=HIGH durante reset  →  0x14
+//
+//  La sequenza reset in display_driver.h forza INT=LOW → addr 0x5D.
+//  Se lo scan I2C trova 0x14 invece di 0x5D, invertire la logica
+//  del pin INT nella sequenza gt911_init() in display_driver.h.
 // ================================================================
 #define TOUCH_SDA        8
 #define TOUCH_SCL        4
 #define TOUCH_INT        3
 #define TOUCH_RST       38
-#define TOUCH_I2C_ADDR  0x5D   // alternativo: 0x5D
+#define TOUCH_I2C_ADDR  0x5D   // 0x5D con INT=LOW al reset; alternativo: 0x14
 
 // ================================================================
-//  MAX6675 — SPI SOFTWARE (GPIO liberi su N4R8)
+//  MAX6675 — SPI SOFTWARE
+//  Connettore P2: IO46=MISO  IO9=SCK  IO14=CS_BASE  IO5=CS_CIELO
+//  ⚠ IO46 = strapping ROM print (pull-down) → safe come MISO input
 // ================================================================
-#define TC_SCK       12
-#define TC_MISO      13
-#define TC_CS_BASE   14
-#define TC_CS_CIELO  15
+#define TC_SCK       9    // P2 — era 12
+#define TC_MISO      46   // P2 — era 13 (strapping, safe come input)
+#define TC_CS_BASE   14   // P2 — invariato
+#define TC_CS_CIELO  5    // P2 — era 15
 
 // ================================================================
-//  RELÈ — GPIO liberi su N4R8: 10, 11, 17, 18
+//  RELÈ — GPIO liberi su N4R8
+//  Connettore P3: IO6=BASE  IO7=CIELO  IO15=LUCE  IO16=FAN
+//  (P4 IO17/IO18 tenuti liberi come riserva)
 // ================================================================
-#define RELAY_BASE   10
-#define RELAY_CIELO  11
-#define RELAY_LUCE   17
-#define RELAY_FAN    18
+#define RELAY_BASE   18    // P3 — era 10
+#define RELAY_CIELO  17    // P3 — era 11
+#define RELAY_LUCE   15   // P3 — era 17
+#define RELAY_FAN    16   // P3 — era 18
 
 #define RELAY_BASE_INV   false
 #define RELAY_CIELO_INV  false
@@ -103,11 +115,9 @@ extern SemaphoreHandle_t g_mutex;
 
 #define MUTEX_TIMEOUT_MS  50
 
-// MUTEX_TAKE() — timeout fisso MUTEX_TIMEOUT_MS, usato in .ino
 #define MUTEX_TAKE() \
   (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE)
 
-// MUTEX_TAKE_MS(ms) — timeout variabile, usato in autotune/wifi/ui_events
 #define MUTEX_TAKE_MS(ms) \
   (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(ms)) == pdTRUE)
 
@@ -115,11 +125,10 @@ extern SemaphoreHandle_t g_mutex;
 
 // ================================================================
 //  TASK CONFIGURATION
-//  ⚠ I nomi _PRIO (non _PRIORITY) sono quelli usati in .ino
 // ================================================================
 #define TASK_LVGL_CORE   0
 #define TASK_LVGL_PRIO   1
-#define TASK_LVGL_STACK  16384   // FIX: 8192→16384, overflow con UI 480×272
+#define TASK_LVGL_STACK  16384
 
 #define TASK_WIFI_CORE   0
 #define TASK_WIFI_PRIO   1
@@ -135,7 +144,6 @@ extern SemaphoreHandle_t g_mutex;
 
 // ================================================================
 //  PARAMETRI RELAY PID
-//  Usati in pid_ctrl.h
 // ================================================================
 #define RELAY_DUTY_MIN_PCT    5
 #define RELAY_DUTY_MAX_PCT   95
@@ -143,7 +151,6 @@ extern SemaphoreHandle_t g_mutex;
 
 // ================================================================
 //  PARAMETRI SICUREZZA
-//  Usati in FornoPizza_S3.ino
 // ================================================================
 #define TEMP_MAX_SAFE        480.0f
 #define FAN_OFF_TEMP          80.0f
