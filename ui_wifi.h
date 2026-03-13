@@ -1,5 +1,5 @@
 /**
- * ui_wifi.h — Forno Pizza v19
+ * ui_wifi.h — Forno Pizza v22-S3
  * ================================================================
  * Due nuove schermate:
  *
@@ -78,6 +78,11 @@ extern volatile int g_wifi_net_count;   // -1=scansione in corso, 0..N=risultati
 extern char         g_wifi_selected_ssid[33];
 extern volatile bool g_wifi_scan_request;  // flag: richiedi nuova scansione
 
+// FIX v23: flag thread-safe per aggiornamento UI da Task_WiFi → Task_LVGL
+// Task_WiFi scrive SOLO questi flag, Task_LVGL li legge e chiama le funzioni UI
+extern volatile bool g_wifi_scan_done;      // scan completato → aggiorna lista
+extern volatile bool g_wifi_status_changed; // stato connessione cambiato → aggiorna label
+
 // ----------------------------------------------------------------
 //  STATO OTA
 // ----------------------------------------------------------------
@@ -91,13 +96,14 @@ extern char          g_ota_status_msg[64];
 //  FUNZIONI
 // ----------------------------------------------------------------
 void ui_build_wifi(void);           // chiamata da ui_init()
+void ui_build_wifi_pwd(void);
 void ui_build_ota(void);            // chiamata da ui_init()
 
 void ui_show_wifi_scan(void);       // naviga a WIFI_SCAN
 void ui_show_wifi_pwd(const char* ssid); // naviga a WIFI_PWD
 void ui_show_ota(void);             // naviga a OTA
 
-// Chiamate dal task WiFi (core 0) quando lo stato cambia
-void ui_wifi_update_list(void);     // rinnova la lista reti (da loop LVGL)
+// Chiamate SOLO da Task_LVGL (thread-safe)
+void ui_wifi_update_list(void);     // rinnova la lista reti
 void ui_wifi_update_status(void);   // aggiorna label stato connessione
 void ui_ota_update_progress(void);  // aggiorna barra OTA

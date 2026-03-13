@@ -209,7 +209,6 @@ static lv_obj_t* make_pm(lv_obj_t* p, int x, int y, int w, int h,
     lv_obj_set_style_shadow_width(b, 0, 0);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     // ← ANIMAZIONE 5: bounce al tocco
-    lv_obj_add_event_cb(b, cb_anim_bounce, LV_EVENT_PRESSED, NULL);
     lv_obj_t* l = lv_label_create(b);
     lv_label_set_text(l, t);
     lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
@@ -471,8 +470,8 @@ static void build_main() {
         lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
         return b;
     };
-    ui_BarPreheatBase  = make_preheat_bar(ui_ScreenMain, 2,   211, 234);
-    ui_BarPreheatCielo = make_preheat_bar(ui_ScreenMain, 244, 211, 234);
+    ui_BarPreheatBase  = make_preheat_bar(ui_ScreenMain, 2,   217, 234);
+    ui_BarPreheatCielo = make_preheat_bar(ui_ScreenMain, 244, 217, 234);
 }
 
 // ================================================================
@@ -489,7 +488,7 @@ static void build_temp() {
         LV_SYMBOL_CHARGE " LUCE", cb_toggle_luce, &ui_TempLblBtnLuce);
 
     lv_obj_t* bmn = lv_btn_create(ui_ScreenTemp);
-    lv_obj_set_pos(bmn, 315, 1); lv_obj_set_size(bmn, 164, 30);
+    lv_obj_set_pos(bmn, 317, 1); lv_obj_set_size(bmn, 160, 30);
     lv_obj_set_style_bg_color(bmn, lv_color_make(0x00,0x20,0x0A), 0);
     lv_obj_set_style_border_color(bmn, UI_COL_GREEN, 0);
     lv_obj_set_style_border_width(bmn, 2, 0);
@@ -526,21 +525,21 @@ static void build_temp() {
     lv_obj_set_style_text_align(ui_TempSetBase, LV_TEXT_ALIGN_CENTER, 0);
 
     // Bottoni ± BASE con bounce (gestito da make_pm)
-    make_pm(pb, 114, 14, 108, 52, "+", UI_COL_ACCENT, cb_base_plus);
-    make_pm(pb, 114, 70, 108, 52, "-", UI_COL_ACCENT, cb_base_minus);
+    make_pm(pb, 116, 14, 100, 44, "+", UI_COL_ACCENT, cb_base_plus);
+    make_pm(pb, 116, 62, 100, 44, "-", UI_COL_ACCENT, cb_base_minus);
 
     lv_obj_t* sbl = lv_label_create(pb);
     lv_label_set_text(sbl, "5\xC2\xB0""C");
     lv_obj_set_style_text_font(sbl, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(sbl, UI_COL_GRAY, 0);
-    lv_obj_set_pos(sbl, 144, 126);
+    lv_obj_set_pos(sbl, 144, 112);
 
     ui_TempErrBase = lv_label_create(pb); lv_label_set_text(ui_TempErrBase, "");
     lv_obj_set_style_text_font(ui_TempErrBase, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ui_TempErrBase, lv_color_make(0xFF,0x40,0x40), 0);
     lv_obj_set_pos(ui_TempErrBase, 0, 126);
 
-    ui_TempBarBase = make_bar(pb, 0, 138, 222, 8, UI_COL_ACCENT);
+    ui_TempBarBase = make_bar(pb, 0, 132, 222, 8, UI_COL_ACCENT);
 
     // Panel CIELO
     lv_obj_t* pc = lv_obj_create(ui_ScreenTemp);
@@ -566,21 +565,21 @@ static void build_temp() {
     lv_obj_set_style_text_align(ui_TempSetCielo, LV_TEXT_ALIGN_CENTER, 0);
 
     // Bottoni ± CIELO con bounce (gestito da make_pm)
-    make_pm(pc, 114, 14, 120, 52, "+", UI_COL_CIELO, cb_cielo_plus);
-    make_pm(pc, 114, 70, 120, 52, "-", UI_COL_CIELO, cb_cielo_minus);
+    make_pm(pc, 116, 14, 100, 44, "+", UI_COL_CIELO, cb_cielo_plus);
+    make_pm(pc, 116, 62, 100, 44, "-", UI_COL_CIELO, cb_cielo_minus);
 
     lv_obj_t* scl = lv_label_create(pc);
     lv_label_set_text(scl, "5\xC2\xB0""C");
     lv_obj_set_style_text_font(scl, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(scl, UI_COL_GRAY, 0);
-    lv_obj_set_pos(scl, 148, 126);
+    lv_obj_set_pos(scl, 148, 112);
 
     ui_TempErrCielo = lv_label_create(pc); lv_label_set_text(ui_TempErrCielo, "");
     lv_obj_set_style_text_font(ui_TempErrCielo, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ui_TempErrCielo, lv_color_make(0xFF,0x40,0x40), 0);
     lv_obj_set_pos(ui_TempErrCielo, 0, 126);
 
-    ui_TempBarCielo = make_bar(pc, 0, 138, 228, 8, UI_COL_CIELO);
+    ui_TempBarCielo = make_bar(pc, 0, 132, 228, 8, UI_COL_CIELO);
 
     // Sep y=183
     make_sep(ui_ScreenTemp, 183, lv_color_make(0x30,0x30,0x48));
@@ -589,7 +588,7 @@ static void build_temp() {
     auto make_nav_action = [&](int x, lv_color_t bg, lv_color_t border,
                                const char* txt, lv_color_t tcol, lv_event_cb_t cb) {
         lv_obj_t* b = lv_btn_create(ui_ScreenTemp);
-        lv_obj_set_pos(b, x, 185); lv_obj_set_size(b, 158, 40);
+        lv_obj_set_pos(b, x, 185); lv_obj_set_size(b, 156, 40);
         lv_obj_set_style_bg_color(b, bg, 0);
         lv_obj_set_style_border_color(b, border, 0);
         lv_obj_set_style_border_width(b, 2, 0);
@@ -597,7 +596,6 @@ static void build_temp() {
         lv_obj_set_style_shadow_width(b, 0, 0);
         lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
         // ← ANIMAZIONE 5: bounce
-        lv_obj_add_event_cb(b, cb_anim_bounce, LV_EVENT_PRESSED, NULL);
         lv_obj_t* l = lv_label_create(b);
         lv_label_set_text(l, txt);
         lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
@@ -749,17 +747,16 @@ static void build_pid_screen(lv_obj_t** scr_out, lv_color_t hcol, const char* ht
     *lbl_set = lv_label_create(scr); lv_label_set_text(*lbl_set, "Set: ---\xC2\xB0""C");
     lv_obj_set_style_text_font(*lbl_set, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(*lbl_set, UI_COL_GRAY, 0);
-    lv_obj_set_pos(*lbl_set, 2, 260);
+    lv_obj_set_pos(*lbl_set, 2, 266);
 
     lv_obj_t* bsave = lv_btn_create(scr);
-    lv_obj_set_pos(bsave, 360, 255); lv_obj_set_size(bsave, 118, 30);
+    lv_obj_set_pos(bsave, 360, 261); lv_obj_set_size(bsave, 118, 30);
     lv_obj_set_style_bg_color(bsave, lv_color_make(0x00,0x28,0x14), 0);
     lv_obj_set_style_border_color(bsave, UI_COL_GREEN, 0);
     lv_obj_set_style_border_width(bsave, 2, 0);
     lv_obj_set_style_radius(bsave, 8, 0);
     lv_obj_set_style_shadow_width(bsave, 0, 0);
     lv_obj_add_event_cb(bsave, cb_pid_save, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(bsave, cb_anim_bounce, LV_EVENT_PRESSED, NULL);
     lv_obj_t* lsave = lv_label_create(bsave);
     lv_label_set_text(lsave, LV_SYMBOL_SAVE " SALVA");
     lv_obj_set_style_text_font(lsave, &lv_font_montserrat_14, 0);
@@ -769,7 +766,7 @@ static void build_pid_screen(lv_obj_t** scr_out, lv_color_t hcol, const char* ht
     *lbl_save = lv_label_create(scr); lv_label_set_text(*lbl_save, "");
     lv_obj_set_style_text_font(*lbl_save, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(*lbl_save, UI_COL_GREEN, 0);
-    lv_obj_set_pos(*lbl_save, 160, 260);
+    lv_obj_set_pos(*lbl_save, 160, 266);
 }
 
 static void build_pid_base() {
@@ -786,7 +783,7 @@ static void build_pid_base() {
     // (La stessa variabile ui_BarAutotune viene usata per entrambe le schermate
     //  PID, poiché le schermate non sono visibili contemporaneamente)
     ui_BarAutotune = lv_bar_create(ui_ScreenPidBase);
-    lv_obj_set_pos(ui_BarAutotune, 10, 200);
+    lv_obj_set_pos(ui_BarAutotune, 10, 210);
     lv_obj_set_size(ui_BarAutotune, 460, 8);
     lv_bar_set_range(ui_BarAutotune, 0, 100);
     lv_bar_set_value(ui_BarAutotune, 0, LV_ANIM_OFF);
@@ -843,7 +840,7 @@ static void build_graph() {
     lv_obj_align(leg_c, LV_ALIGN_RIGHT_MID, -2, 0);
 
     lv_obj_t* bbk = lv_btn_create(ui_ScreenGraph);
-    lv_obj_set_pos(bbk, 208, 2); lv_obj_set_size(bbk, 64, 28);
+    lv_obj_set_pos(bbk, 404, 2); lv_obj_set_size(bbk, 64, 28);
     lv_obj_set_style_bg_color(bbk, lv_color_make(0x30,0x60,0x10), 0);
     lv_obj_set_style_bg_opa(bbk, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(bbk, 0, 0);
@@ -857,7 +854,7 @@ static void build_graph() {
     // Scale Y labels
     for (int i = 0; i <= 4; i++) {
         int temp = i * 100;
-        int y = 224 - i * 48;
+        int y = 220 - i * 48;
         lv_obj_t* l = lv_label_create(ui_ScreenGraph);
         char buf[8]; snprintf(buf, sizeof(buf), "%d", temp);
         lv_label_set_text(l, buf);
@@ -903,15 +900,14 @@ static void build_graph() {
     auto make_preset = [](lv_obj_t* scr, int x, const char* txt,
                           lv_event_cb_t cb, bool active) -> lv_obj_t* {
         lv_obj_t* b = lv_btn_create(scr);
-        lv_obj_set_pos(b, x, 228); lv_obj_set_size(b, 156, 40);
+        lv_obj_set_pos(b, x, 233); lv_obj_set_size(b, 156, 40);
         lv_obj_set_style_bg_color(b, active ? GLIME : lv_color_make(0x0C,0x1C,0x0C), 0);
         lv_obj_set_style_border_color(b, GLIME, 0);
         lv_obj_set_style_border_width(b, 1, 0);
         lv_obj_set_style_radius(b, 6, 0);
         lv_obj_set_style_shadow_width(b, 0, 0);
         lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_add_event_cb(b, cb_anim_bounce, LV_EVENT_PRESSED, NULL);
-        lv_obj_t* l = lv_label_create(b); lv_label_set_text(l, txt);
+            lv_obj_t* l = lv_label_create(b); lv_label_set_text(l, txt);
         lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(l, active ? lv_color_black() : GLIME, 0);
         lv_obj_center(l);
@@ -1016,7 +1012,6 @@ static void build_ricette() {
         lv_obj_set_style_pad_all(card, 8, 0);
         lv_obj_add_event_cb(card, cb_ricetta_select, LV_EVENT_CLICKED, (void*)(intptr_t)i);
         // ← ANIMAZIONE 12: feedback card al tocco
-        lv_obj_add_event_cb(card, cb_anim_card_press, LV_EVENT_PRESSED, NULL);
 
         lv_obj_t* ln = lv_label_create(card); lv_label_set_text(ln, r.nome);
         lv_obj_set_style_text_font(ln, &lv_font_montserrat_18, 0);
@@ -1053,6 +1048,7 @@ void ui_init(void) {
     build_ricette();
     ui_build_wifi();
     ui_build_ota();
+    ui_build_wifi_pwd();
     lv_scr_load(ui_ScreenMain);
 }
 

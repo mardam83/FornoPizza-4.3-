@@ -12,6 +12,7 @@
 #include "ui_animations.h"   // disponibile per usi futuri
 #include <Arduino.h>
 
+bool g_arc_snap = false;
 static void mark_dirty() { g_state.nvs_dirty = true; }
 
 static void refresh_active() {
@@ -30,22 +31,26 @@ static void refresh_active() {
 // ================================================================
 void cb_base_minus(lv_event_t*) {
   g_state.set_base = fmax(50.0, g_state.set_base - 5.0);
-  anim_setpoint_drag_feedback(ui_TempSetBase);  // ← ANIMAZIONE 20
+  anim_setpoint_drag_feedback(ui_TempSetBase);
+  g_arc_snap = true;          // ← arco snap istantaneo
   refresh_active();
 }
-void cb_base_plus(lv_event_t*)  {
+void cb_base_plus(lv_event_t*) {
   g_state.set_base = fmin(500.0, g_state.set_base + 5.0);
-  anim_setpoint_drag_feedback(ui_TempSetBase);  // ← ANIMAZIONE 20
+  anim_setpoint_drag_feedback(ui_TempSetBase);
+  g_arc_snap = true;          // ← arco snap istantaneo
   refresh_active();
 }
 void cb_cielo_minus(lv_event_t*) {
   g_state.set_cielo = fmax(50.0, g_state.set_cielo - 5.0);
-  anim_setpoint_drag_feedback(ui_TempSetCielo); // ← ANIMAZIONE 20
+  anim_setpoint_drag_feedback(ui_TempSetCielo);
+  g_arc_snap = true;          // ← arco snap istantaneo
   refresh_active();
 }
 void cb_cielo_plus(lv_event_t*) {
   g_state.set_cielo = fmin(500.0, g_state.set_cielo + 5.0);
-  anim_setpoint_drag_feedback(ui_TempSetCielo); // ← ANIMAZIONE 20
+  anim_setpoint_drag_feedback(ui_TempSetCielo);
+  g_arc_snap = true;          // ← arco snap istantaneo
   refresh_active();
 }
 

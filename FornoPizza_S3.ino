@@ -348,19 +348,34 @@ static void Task_PID(void* param) {
 static void Task_LVGL(void* param) {
   LOG_I(LOG_LVGL, "[Core %d] Task_LVGL avviato\n", xPortGetCoreID());
   uint32_t last_ui_ms = 0;
-
+ 
   for (;;) {
     lv_tick_inc(1);
     lv_timer_handler();
-
+ 
     uint32_t now = millis();
     if (now - last_ui_ms >= 100) {
       last_ui_ms = now;
+ 
+#if TASK_WIFI_ENABLE
+      // ── FIX v23: consuma flag scritti da Task_WiFi ──────────────
+      // IMPORTANTE: queste chiamate sono sicure perché siamo nel
+      // thread Task_LVGL — l'unico che può toccare oggetti LVGL.
+      if (g_wifi_scan_done) {
+        g_wifi_scan_done = false;
+        ui_wifi_update_list();
+      }
+      if (g_wifi_status_changed) {
+        g_wifi_status_changed = false;
+        ui_wifi_update_status();
+      }
+#endif
+ 
       Screen scr;
       if (MUTEX_TAKE()) {
         scr = g_state.active_screen;
         MUTEX_GIVE();
-
+ 
         switch (scr) {
           case Screen::MAIN:
             if (ui_ScreenMain && lv_scr_act() == ui_ScreenMain)
@@ -379,9 +394,13 @@ static void Task_LVGL(void* param) {
               ui_refresh_graph(&g_state);
             break;
 #if TASK_WIFI_ENABLE
+          // FIX v23: rimosso ui_wifi_update_list/status da qui —
+          // vengono gestiti dai flag sopra, non ogni 100ms su ogni screen.
+          // Manteniamo solo ui_ota_update_progress che è sicuro
+          // (viene chiamato da Task_LVGL, e OTA non chiama UI direttamente).
           case Screen::WIFI_SCAN:
-            ui_wifi_update_list();
-            ui_wifi_update_status();
+            // nessuna azione — la lista si aggiorna via g_wifi_scan_done
+            // lo status si aggiorna via g_wifi_status_changed
             break;
           case Screen::OTA:
             ui_ota_update_progress();
