@@ -8,7 +8,8 @@
 
 #include "ui.h"
 #include "ui_wifi.h"
-#include "ui_animations.h"   // ← NUOVO: tutte le animazioni
+#include "ui_animations.h"
+
 
 // ================================================================
 //  DIMENSIONI SCHERMO
@@ -70,9 +71,9 @@ lv_obj_t* ui_LblSetCieloTun     = NULL;
 lv_obj_t* ui_LblSaveStatusCielo = NULL;
 
 lv_obj_t* ui_ScreenGraph  = NULL;
-lv_obj_t* ui_Chart        = NULL;
-lv_chart_series_t* ui_SerBase  = NULL;
-lv_chart_series_t* ui_SerCielo = NULL;
+lv_obj_t* ui_Chart        = NULL;  // non usato (canvas)
+lv_chart_series_t* ui_SerBase  = NULL;  // non usato
+lv_chart_series_t* ui_SerCielo = NULL;  // non usato
 lv_obj_t* ui_GraphTimeLbl = NULL;
 lv_obj_t* ui_GraphMaxLbl  = NULL;
 lv_obj_t* ui_GraphMinLbl  = NULL;
@@ -80,6 +81,18 @@ lv_obj_t* ui_BtnPreset5   = NULL;
 lv_obj_t* ui_BtnPreset15  = NULL;
 lv_obj_t* ui_BtnPreset30  = NULL;
 int       g_graph_minutes  = 15;
+
+// ── Grafico canvas (sostituisce lv_chart) ────────────────────
+#define GCVS_W  420   // larghezza area dati canvas
+#define GCVS_H  160   // altezza area dati canvas
+#define GCVS_X   58   // x canvas sullo schermo (spazio scala Y)
+#define GCVS_Y   34   // y canvas sullo schermo (sotto header)
+static lv_obj_t*  s_canvas      = NULL;
+static lv_color_t s_cbuf[GCVS_W * GCVS_H];  // buffer canvas in SRAM
+static int        s_graph_y_min = 0;
+static int        s_graph_y_max = 450;
+// Label scala Y (5 label statiche, aggiornate da refresh)
+static lv_obj_t*  s_ylbl[5]     = {NULL,NULL,NULL,NULL,NULL};
 
 // ── NUOVI WIDGET v22 ────────────────────────────────────────────
 // Barre preheat (sottili, sovrapposte ai pannelli BASE/CIELO su MAIN)
@@ -89,6 +102,14 @@ lv_obj_t* ui_BarPreheatCielo = NULL;   // anim 14
 lv_obj_t* ui_BarAutotune     = NULL;   // anim 19 (condivisa base+cielo)
 // Toast notifica overlay
 static lv_obj_t* s_toast_ref = NULL;   // anim 16
+
+// Schermata AUTOTUNE PID
+lv_obj_t* ui_ScreenAutotune   = NULL;
+lv_obj_t* ui_AutoBar          = NULL;
+lv_obj_t* ui_AutoLblStatus    = NULL;
+lv_obj_t* ui_AutoLblSplit     = NULL;
+lv_obj_t* ui_AutoLblBase      = NULL;
+lv_obj_t* ui_AutoLblCielo     = NULL;
 
 GraphBuffer g_graph = {{0},{0},0,0};
 
@@ -109,12 +130,15 @@ extern void cb_pct_base_plus(lv_event_t*);
 extern void cb_pct_cielo_minus(lv_event_t*);
 extern void cb_pct_cielo_plus(lv_event_t*);
 extern void cb_pid_save(lv_event_t*);
+extern void cb_autotune_start(lv_event_t*);
+extern void cb_autotune_stop(lv_event_t*);
 extern void cb_goto_temp(lv_event_t*);
 extern void cb_goto_main_from_temp(lv_event_t*);
 extern void cb_goto_pid_base(lv_event_t*);
 extern void cb_goto_pid_cielo(lv_event_t*);
 extern void cb_goto_graph(lv_event_t*);
 extern void cb_goto_main_from_graph(lv_event_t*);
+extern void cb_goto_autotune(lv_event_t*);
 extern void cb_preset_5(lv_event_t*);
 extern void cb_preset_15(lv_event_t*);
 extern void cb_preset_30(lv_event_t*);
@@ -207,8 +231,8 @@ static lv_obj_t* make_pm(lv_obj_t* p, int x, int y, int w, int h,
     lv_obj_set_style_border_width(b, 2, 0);
     lv_obj_set_style_radius(b, 8, 0);
     lv_obj_set_style_shadow_width(b, 0, 0);
+    //lv_obj_set_style_transition_duration(b, 0, LV_PART_MAIN);  // nessuna animazione pressione
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
-    // ← ANIMAZIONE 5: bounce al tocco
     lv_obj_t* l = lv_label_create(b);
     lv_label_set_text(l, t);
     lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
@@ -226,6 +250,7 @@ static lv_obj_t* make_ctrl(lv_obj_t* p, int x, int y, int w, int h,
     lv_obj_set_style_border_width(b, 2, 0);
     lv_obj_set_style_radius(b, 8, 0);
     lv_obj_set_style_shadow_width(b, 0, 0);
+    //lv_obj_set_style_transition_duration(b, 0, LV_PART_MAIN);  // nessuna animazione pressione
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t* l = lv_label_create(b);
     lv_label_set_text(l, txt);
@@ -250,12 +275,13 @@ static void build_main() {
     auto make_nav = [](lv_obj_t* scr, int x, lv_color_t bg, lv_color_t border,
                        const char* txt, lv_color_t tcol, lv_event_cb_t cb) -> lv_obj_t* {
         lv_obj_t* b = lv_btn_create(scr);
-        lv_obj_set_pos(b, x, 1); lv_obj_set_size(b, 118, 30);
+        lv_obj_set_pos(b, x, 1); lv_obj_set_size(b, 150, 30);
         lv_obj_set_style_bg_color(b, bg, 0);
         lv_obj_set_style_border_color(b, border, 0);
         lv_obj_set_style_border_width(b, 2, 0);
         lv_obj_set_style_radius(b, 8, 0);
         lv_obj_set_style_shadow_width(b, 0, 0);
+        //lv_obj_set_style_transition_duration(b, 0, LV_PART_MAIN);
         lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
         lv_obj_t* l = lv_label_create(b);
         lv_label_set_text(l, txt);
@@ -265,17 +291,16 @@ static void build_main() {
         lv_obj_center(l);
         return b;
     };
-    make_nav(ui_ScreenMain,   2, lv_color_make(0x14,0x14,0x22), UI_COL_ACCENT,
-             LV_SYMBOL_SETTINGS " CTRL",  UI_COL_ACCENT,  cb_goto_temp);
-    make_nav(ui_ScreenMain, 122, lv_color_make(0x05,0x09,0x05), lv_color_make(0x80,0xFF,0x40),
-             LV_SYMBOL_IMAGE " GRAF",     lv_color_make(0x80,0xFF,0x40), cb_goto_graph);
-    make_nav(ui_ScreenMain, 242, lv_color_make(0x00,0x10,0x20), UI_COL_CYAN,
-             LV_SYMBOL_WIFI " WiFi",      UI_COL_CYAN,    cb_goto_wifi);
-    make_nav(ui_ScreenMain, 362, lv_color_make(0x14,0x08,0x00), lv_color_make(0xFF,0x80,0x00),
-             LV_SYMBOL_UPLOAD " OTA",     lv_color_make(0xFF,0x80,0x00), cb_goto_ota);
+    // Tre pulsanti distribuiti orizzontalmente: CONTROL, GRAF, WiFi
+    make_nav(ui_ScreenMain,   5, lv_color_make(0x14,0x14,0x22), UI_COL_ACCENT,
+             LV_SYMBOL_SETTINGS " CONTROL",  UI_COL_ACCENT,  cb_goto_temp);
+    make_nav(ui_ScreenMain, 165, lv_color_make(0x05,0x09,0x05), lv_color_make(0x80,0xFF,0x40),
+             LV_SYMBOL_IMAGE " GRAFIC",       lv_color_make(0x80,0xFF,0x40), cb_goto_graph);
+    make_nav(ui_ScreenMain, 325, lv_color_make(0x00,0x10,0x20), UI_COL_CYAN,
+             LV_SYMBOL_WIFI " WiFi",        UI_COL_CYAN,    cb_goto_wifi);
 
     // Sep y=33
-    make_sep(ui_ScreenMain, 33, UI_COL_DARKGRAY);
+    //make_sep(ui_ScreenMain, 33, UI_COL_DARKGRAY);
 
     // Pannello BASE x=2 y=36 w=234 h=178
     lv_obj_t* pb = lv_obj_create(ui_ScreenMain);
@@ -354,16 +379,17 @@ static void build_main() {
     lv_obj_set_pos(ui_LabelPidCielo, 0, 106);
 
     // Sep y=215
-    make_sep(ui_ScreenMain, 215, UI_COL_DARKGRAY);
+    //make_sep(ui_ScreenMain, 215, UI_COL_DARKGRAY);
 
     // ON/OFF bar y=217 h=31
     ui_BtnEnBase  = lv_btn_create(ui_ScreenMain);
-    lv_obj_set_pos(ui_BtnEnBase,   2, 217); lv_obj_set_size(ui_BtnEnBase,  148, 31);
+    lv_obj_set_pos(ui_BtnEnBase,   2, 217); lv_obj_set_size(ui_BtnEnBase,  150, 31);
     lv_obj_set_style_bg_color(ui_BtnEnBase,  lv_color_make(0x20,0x20,0x2E), 0);
     lv_obj_set_style_border_color(ui_BtnEnBase, lv_color_make(0x48,0x48,0x60), 0);
     lv_obj_set_style_border_width(ui_BtnEnBase,  2, 0);
     lv_obj_set_style_radius(ui_BtnEnBase, 8, 0);
     lv_obj_set_style_shadow_width(ui_BtnEnBase, 0, 0);
+    //lv_obj_set_style_transition_duration(ui_BtnEnBase, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(ui_BtnEnBase,  cb_toggle_base,  LV_EVENT_CLICKED, NULL);
     ui_LabelBtnBase = lv_label_create(ui_BtnEnBase);
     lv_label_set_text(ui_LabelBtnBase, "BASE OFF");
@@ -375,12 +401,13 @@ static void build_main() {
     lv_obj_center(ui_LabelBtnBase);
 
     ui_BtnEnCielo = lv_btn_create(ui_ScreenMain);
-    lv_obj_set_pos(ui_BtnEnCielo, 154, 217); lv_obj_set_size(ui_BtnEnCielo, 148, 31);
+    lv_obj_set_pos(ui_BtnEnCielo, 165, 217); lv_obj_set_size(ui_BtnEnCielo, 150, 31);
     lv_obj_set_style_bg_color(ui_BtnEnCielo, lv_color_make(0x20,0x20,0x2E), 0);
     lv_obj_set_style_border_color(ui_BtnEnCielo, lv_color_make(0x48,0x48,0x60), 0);
     lv_obj_set_style_border_width(ui_BtnEnCielo, 2, 0);
     lv_obj_set_style_radius(ui_BtnEnCielo, 8, 0);
     lv_obj_set_style_shadow_width(ui_BtnEnCielo, 0, 0);
+    //lv_obj_set_style_transition_duration(ui_BtnEnCielo, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(ui_BtnEnCielo, cb_toggle_cielo, LV_EVENT_CLICKED, NULL);
     ui_LabelBtnCielo = lv_label_create(ui_BtnEnCielo);
     lv_label_set_text(ui_LabelBtnCielo, "CIELO OFF");
@@ -392,12 +419,13 @@ static void build_main() {
     lv_obj_center(ui_LabelBtnCielo);
 
     ui_BtnLuce = lv_btn_create(ui_ScreenMain);
-    lv_obj_set_pos(ui_BtnLuce, 306, 217); lv_obj_set_size(ui_BtnLuce, 90, 31);
+    lv_obj_set_pos(ui_BtnLuce, 328, 217); lv_obj_set_size(ui_BtnLuce, 150, 31);
     lv_obj_set_style_bg_color(ui_BtnLuce, lv_color_make(0x20,0x20,0x2E), 0);
     lv_obj_set_style_border_color(ui_BtnLuce, lv_color_make(0x48,0x48,0x60), 0);
     lv_obj_set_style_border_width(ui_BtnLuce, 2, 0);
     lv_obj_set_style_radius(ui_BtnLuce, 8, 0);
     lv_obj_set_style_shadow_width(ui_BtnLuce, 0, 0);
+    //lv_obj_set_style_transition_duration(ui_BtnLuce, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(ui_BtnLuce, cb_toggle_luce, LV_EVENT_CLICKED, NULL);
     ui_LabelBtnLuce = lv_label_create(ui_BtnLuce);
     lv_label_set_text(ui_LabelBtnLuce, LV_SYMBOL_CHARGE " LUCE");
@@ -409,7 +437,7 @@ static void build_main() {
     lv_obj_center(ui_LabelBtnLuce);
 
     // Sep y=249
-    make_sep(ui_ScreenMain, 249, UI_COL_DARKGRAY);
+    //make_sep(ui_ScreenMain, 249, UI_COL_DARKGRAY);
 
     // Status bar y=251 h=21
     lv_obj_t* sb = lv_obj_create(ui_ScreenMain);
@@ -427,7 +455,7 @@ static void build_main() {
     lv_obj_t* lfan = lv_label_create(sb); lv_label_set_text(lfan, "FAN");
     lv_obj_set_style_text_font(lfan, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(lfan, lv_color_make(0x40,0x40,0x55), 0);
-    lv_obj_align(lfan, LV_ALIGN_RIGHT_MID, -4, 0);
+    lv_obj_align(lfan, LV_ALIGN_RIGHT_MID, -30, 0);
 
     ui_LabelStatus = lv_label_create(sb);
     lv_label_set_text(ui_LabelStatus, "Sistema pronto");
@@ -588,14 +616,13 @@ static void build_temp() {
     auto make_nav_action = [&](int x, lv_color_t bg, lv_color_t border,
                                const char* txt, lv_color_t tcol, lv_event_cb_t cb) {
         lv_obj_t* b = lv_btn_create(ui_ScreenTemp);
-        lv_obj_set_pos(b, x, 185); lv_obj_set_size(b, 156, 40);
+        lv_obj_set_pos(b, x, 185); lv_obj_set_size(b, 150, 40);
         lv_obj_set_style_bg_color(b, bg, 0);
         lv_obj_set_style_border_color(b, border, 0);
         lv_obj_set_style_border_width(b, 2, 0);
         lv_obj_set_style_radius(b, 8, 0);
         lv_obj_set_style_shadow_width(b, 0, 0);
         lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
-        // ← ANIMAZIONE 5: bounce
         lv_obj_t* l = lv_label_create(b);
         lv_label_set_text(l, txt);
         lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
@@ -604,11 +631,12 @@ static void build_temp() {
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(l);
     };
-    make_nav_action(  2, lv_color_make(0x00,0x20,0x10), lv_color_make(0x00,0xFF,0x90),
+    // Tre pulsanti distribuiti orizzontalmente: RICETTE, TIMER, PID
+    make_nav_action(  5, lv_color_make(0x00,0x20,0x10), lv_color_make(0x00,0xFF,0x90),
                    LV_SYMBOL_LIST " RICETTE",  lv_color_make(0x00,0xFF,0x90), cb_goto_ricette);
-    make_nav_action(162, lv_color_make(0x10,0x10,0x28), lv_color_make(0x80,0x80,0xFF),
+    make_nav_action(165, lv_color_make(0x10,0x10,0x28), lv_color_make(0x80,0x80,0xFF),
                    LV_SYMBOL_LOOP " TIMER",    lv_color_make(0x80,0x80,0xFF), cb_goto_timer);
-    make_nav_action(322, lv_color_make(0x00,0x14,0x24), UI_COL_TUNING,
+    make_nav_action(325, lv_color_make(0x00,0x14,0x24), UI_COL_TUNING,
                    LV_SYMBOL_SETTINGS " PID",  UI_COL_TUNING,                 cb_goto_pid_base);
 
     // Sep y=225
@@ -647,8 +675,8 @@ static void build_temp() {
     lv_obj_set_pos(ui_LabelPctBase, 2, 12);
 
     // Bottoni PanelSplit con bounce (gestito da make_pm via lv_obj_add_event_cb diretto)
-    ui_BtnPctBaseMinus = make_pm(ui_PanelSplit,  66, 4, 40, 35, "-", UI_COL_ACCENT, cb_pct_base_minus);
-    ui_BtnPctBasePlus  = make_pm(ui_PanelSplit, 110, 4, 40, 35, "+", UI_COL_ACCENT, cb_pct_base_plus);
+    ui_BtnPctBaseMinus = make_pm(ui_PanelSplit,  66, 0, 40, 35, "-", UI_COL_ACCENT, cb_pct_base_minus);
+    ui_BtnPctBasePlus  = make_pm(ui_PanelSplit, 110, 0, 40, 35, "+", UI_COL_ACCENT, cb_pct_base_plus);
 
     lv_obj_t* vsep = lv_obj_create(ui_PanelSplit);
     lv_obj_set_pos(vsep, 154, 4); lv_obj_set_size(vsep, 2, 35);
@@ -662,8 +690,8 @@ static void build_temp() {
     lv_obj_set_style_text_color(ui_LabelPctCielo, UI_COL_CIELO, 0);
     lv_obj_set_pos(ui_LabelPctCielo, 160, 12);
 
-    ui_BtnPctCieloMinus = make_pm(ui_PanelSplit, 224, 4, 40, 35, "-", UI_COL_CIELO, cb_pct_cielo_minus);
-    ui_BtnPctCieloPlus  = make_pm(ui_PanelSplit, 268, 4, 40, 35, "+", UI_COL_CIELO, cb_pct_cielo_plus);
+    ui_BtnPctCieloMinus = make_pm(ui_PanelSplit, 224, 0, 40, 35, "-", UI_COL_CIELO, cb_pct_cielo_minus);
+    ui_BtnPctCieloPlus  = make_pm(ui_PanelSplit, 268, 0, 40, 35, "+", UI_COL_CIELO, cb_pct_cielo_plus);
 
     lv_obj_add_flag(ui_PanelSplit, LV_OBJ_FLAG_HIDDEN);
 
@@ -696,28 +724,10 @@ static void build_pid_screen(lv_obj_t** scr_out, lv_color_t hcol, const char* ht
     lv_obj_t* scr = *scr_out;
     make_header(scr, hcol, htxt);
 
-    auto make_pid_btn = [&](int x, lv_color_t bg, lv_color_t border,
-                            const char* txt, lv_color_t tcol, lv_event_cb_t cb) {
-        lv_obj_t* b = lv_btn_create(scr);
-        lv_obj_set_pos(b, x, 2); lv_obj_set_size(b, 156, 28);
-        lv_obj_set_style_bg_color(b, bg, 0);
-        lv_obj_set_style_border_color(b, border, 0);
-        lv_obj_set_style_border_width(b, 2, 0);
-        lv_obj_set_style_radius(b, 6, 0);
-        lv_obj_set_style_shadow_width(b, 0, 0);
-        lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_t* l = lv_label_create(b);
-        lv_label_set_text(l, txt);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(l, tcol, 0); lv_obj_center(l);
-    };
-    make_pid_btn(  2, lv_color_make(0x0A,0x0A,0x14), btn_l_col, btn_l_txt, btn_l_col, btn_l_cb);
-    make_pid_btn(322, lv_color_make(0x0A,0x0A,0x14), btn_r_col, btn_r_txt, btn_r_col, btn_r_cb);
-
      auto make_pid_row = [&](int y, const char* name, lv_color_t col,
                             lv_event_cb_t cm, lv_event_cb_t cp, lv_obj_t** lbl) {
         lv_obj_t* panel = lv_obj_create(scr);
-        lv_obj_set_pos(panel, 2, y); lv_obj_set_size(panel, 476, 56);
+        lv_obj_set_pos(panel, 2, y); lv_obj_set_size(panel, 476, 50);
         lv_obj_set_style_bg_color(panel, lv_color_make(0x0E,0x0E,0x1E), 0);
         lv_obj_set_style_border_color(panel, col, 0);
         lv_obj_set_style_border_width(panel, 2, 0);
@@ -726,30 +736,27 @@ static void build_pid_screen(lv_obj_t** scr_out, lv_color_t hcol, const char* ht
         lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
  
         lv_obj_t* ln = lv_label_create(panel); lv_label_set_text(ln, name);
-        lv_obj_set_style_text_font(ln, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(ln, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(ln, col, 0); lv_obj_set_pos(ln, 2, 2);
  
         *lbl = lv_label_create(panel); lv_label_set_text(*lbl, "0.00");
-        lv_obj_set_style_text_font(*lbl, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_font(*lbl, &lv_font_montserrat_24, 0);
         lv_obj_set_style_text_color(*lbl, UI_COL_WHITE, 0);
-        lv_obj_set_pos(*lbl, 80, 0);
+        lv_obj_set_pos(*lbl, 70, 0);
  
-        lv_obj_t* bm = make_pm(panel, 300, 2, 80, 48, "-", col, cm);
-        lv_obj_t* bp = make_pm(panel, 386, 2, 80, 48, "+", col, cp);
+        lv_obj_t* bm = make_pm(panel, 300, 0, 80, 40, "-", col, cm);
+        lv_obj_t* bp = make_pm(panel, 386, 0, 80, 40, "+", col, cp);
         (void)bm; (void)bp;
     };
  
-    make_pid_row( 34, "Kp", hcol, cb_kp_m, cb_kp_p, lbl_kp);
-    make_pid_row( 92, "Ki", hcol, cb_ki_m, cb_ki_p, lbl_ki);
-    make_pid_row(150, "Kd", hcol, cb_kd_m, cb_kd_p, lbl_kd);
- 
-    *lbl_set = lv_label_create(scr); lv_label_set_text(*lbl_set, "Set: ---\xC2\xB0""C");
-    lv_obj_set_style_text_font(*lbl_set, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(*lbl_set, UI_COL_GRAY, 0);
-    lv_obj_set_pos(*lbl_set, 2, 244);
- 
+    // Righe PID leggermente più in alto per lasciare più respiro in basso
+    make_pid_row( 30, "Kp", hcol, cb_kp_m, cb_kp_p, lbl_kp);
+    make_pid_row( 82, "Ki", hcol, cb_ki_m, cb_ki_p, lbl_ki);
+    make_pid_row(134, "Kd", hcol, cb_kd_m, cb_kd_p, lbl_kd);
+
+    // ── Bottone SALVA  y=192 (prima era 190, spostato a sinistra per far posto ai nav)
     lv_obj_t* bsave = lv_btn_create(scr);
-    lv_obj_set_pos(bsave, 2, 210); lv_obj_set_size(bsave, 220, 30);
+    lv_obj_set_pos(bsave, 2, 192); lv_obj_set_size(bsave, 476, 28);
     lv_obj_set_style_bg_color(bsave, lv_color_make(0x00,0x28,0x14), 0);
     lv_obj_set_style_border_color(bsave, UI_COL_GREEN, 0);
     lv_obj_set_style_border_width(bsave, 2, 0);
@@ -761,12 +768,20 @@ static void build_pid_screen(lv_obj_t** scr_out, lv_color_t hcol, const char* ht
     lv_obj_set_style_text_font(lsave, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(lsave, UI_COL_GREEN, 0);
     lv_obj_center(lsave);
- 
+
+    // ── Barra informativa set + save status  y=222
+    *lbl_set = lv_label_create(scr); lv_label_set_text(*lbl_set, "Set: ---\xC2\xB0""C");
+    lv_obj_set_style_text_font(*lbl_set, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(*lbl_set, UI_COL_GRAY, 0);
+    lv_obj_set_pos(*lbl_set, 2, 222);
+
     *lbl_save = lv_label_create(scr); lv_label_set_text(*lbl_save, "");
-    lv_obj_set_style_text_font(*lbl_save, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(*lbl_save, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(*lbl_save, UI_COL_GREEN, 0);
-    lv_obj_set_pos(*lbl_save, 230, 244);
-    }
+    lv_obj_set_pos(*lbl_save, 230, 222);
+
+    // Spazio in basso lasciato libero (prima occupato dai bottoni di navigazione)
+}
 
 static void build_pid_base() {
     build_pid_screen(&ui_ScreenPidBase,
@@ -778,12 +793,32 @@ static void build_pid_base() {
         cb_kd_base_m, cb_kd_base_p, &ui_LblKdBase,
         &ui_LblSetBaseTun, &ui_LblSaveStatus);
 
+    // Pulsanti barra alta: sinistra = CTRL, destra = PID CIELO
+    auto mk_bar_btn = [](lv_obj_t* parent, int x, const char* txt, lv_color_t col, lv_event_cb_t cb) {
+        lv_obj_t* b = lv_btn_create(parent);
+        lv_obj_set_pos(b, x, 2); lv_obj_set_size(b, 90, 28);
+        lv_obj_set_style_bg_color(b, lv_color_make(0x00,0x20,0x24), 0);
+        lv_obj_set_style_border_color(b, col, 0);
+        lv_obj_set_style_border_width(b, 1, 0);
+        lv_obj_set_style_radius(b, 6, 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t* l = lv_label_create(b);
+        lv_label_set_text(l, txt);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(l, col, 0);
+        lv_obj_center(l);
+    };
+    mk_bar_btn(ui_ScreenPidBase, 2,           LV_SYMBOL_LEFT " CTRL",     lv_color_make(0x00,0x60,0x30), cb_goto_temp);
+    mk_bar_btn(ui_ScreenPidBase, SCR_W - 92,  "PID CIELO " LV_SYMBOL_RIGHT, UI_COL_CIELO,                 cb_goto_pid_cielo);
+
     // ── ANIM 19: barra autotune indeterminate — aggiunta su ui_ScreenPidBase
     // (La stessa variabile ui_BarAutotune viene usata per entrambe le schermate
     //  PID, poiché le schermate non sono visibili contemporaneamente)
     ui_BarAutotune = lv_bar_create(ui_ScreenPidBase);
-    lv_obj_set_pos(ui_BarAutotune, 10, 256);
-    lv_obj_set_size(ui_BarAutotune, 460, 6);
+    // Nota UI: la barra deve stare sopra ai bottoni nav (y=238) per non coprirli.
+    lv_obj_set_pos(ui_BarAutotune, 10, 232);
+    lv_obj_set_size(ui_BarAutotune, 460, 4);
     lv_bar_set_range(ui_BarAutotune, 0, 100);
     lv_bar_set_value(ui_BarAutotune, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(ui_BarAutotune, lv_color_make(0x18,0x18,0x28), LV_PART_MAIN);
@@ -799,24 +834,155 @@ static void build_pid_cielo() {
     build_pid_screen(&ui_ScreenPidCielo,
         UI_COL_CIELO, LV_SYMBOL_SETTINGS "  PID — CIELO",
         LV_SYMBOL_LEFT " BASE",  UI_COL_ACCENT,                   cb_goto_pid_base,
-        "CTRL " LV_SYMBOL_RIGHT, lv_color_make(0x00,0x60,0x30),   cb_goto_temp,
+        "AUTO PID " LV_SYMBOL_RIGHT, UI_COL_TUNING,               cb_goto_autotune,
         cb_kp_cielo_m, cb_kp_cielo_p, &ui_LblKpCielo,
         cb_ki_cielo_m, cb_ki_cielo_p, &ui_LblKiCielo,
         cb_kd_cielo_m, cb_kd_cielo_p, &ui_LblKdCielo,
         &ui_LblSetCieloTun, &ui_LblSaveStatusCielo);
+
+    // Pulsanti barra alta: sinistra = PID BASE, destra = AUTOTUNE
+    auto mk_bar_btn = [](lv_obj_t* parent, int x, const char* txt, lv_color_t col, lv_event_cb_t cb) {
+        lv_obj_t* b = lv_btn_create(parent);
+        lv_obj_set_pos(b, x, 2); lv_obj_set_size(b, 90, 28);
+        lv_obj_set_style_bg_color(b, lv_color_make(0x00,0x20,0x24), 0);
+        lv_obj_set_style_border_color(b, col, 0);
+        lv_obj_set_style_border_width(b, 1, 0);
+        lv_obj_set_style_radius(b, 6, 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t* l = lv_label_create(b);
+        lv_label_set_text(l, txt);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(l, col, 0);
+        lv_obj_center(l);
+    };
+    mk_bar_btn(ui_ScreenPidCielo, 2,           LV_SYMBOL_LEFT " PID BASE", UI_COL_ACCENT,   cb_goto_pid_base);
+    mk_bar_btn(ui_ScreenPidCielo, SCR_W - 92,  "AUTOTUNE " LV_SYMBOL_RIGHT, UI_COL_TUNING, cb_goto_autotune);
     // Nota: ui_BarAutotune è condivisa; su PID_CIELO non serve ridefinirla.
     // Se necessario in futuro, creare ui_BarAutotuneCielo separata.
 }
 
 // ================================================================
-//  BUILD GRAPH
+//  BUILD AUTOTUNE PID
+// ================================================================
+static void build_autotune() {
+    ui_ScreenAutotune = make_screen(UI_COL_BG);
+    lv_obj_t* scr = ui_ScreenAutotune;
+
+    make_header(scr, UI_COL_TUNING, LV_SYMBOL_PLAY "  AUTOTUNE PID");
+
+    // Pulsanti barra alta: sinistra = PID CIELO, destra = CTRL
+    auto mk_bar_btn = [](lv_obj_t* parent, int x, const char* txt, lv_color_t col, lv_event_cb_t cb) {
+        lv_obj_t* b = lv_btn_create(parent);
+        lv_obj_set_pos(b, x, 2); lv_obj_set_size(b, 90, 28);
+        lv_obj_set_style_bg_color(b, lv_color_make(0x00,0x20,0x24), 0);
+        lv_obj_set_style_border_color(b, col, 0);
+        lv_obj_set_style_border_width(b, 1, 0);
+        lv_obj_set_style_radius(b, 6, 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t* l = lv_label_create(b);
+        lv_label_set_text(l, txt);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(l, col, 0);
+        lv_obj_center(l);
+    };
+    mk_bar_btn(scr, 2,           LV_SYMBOL_LEFT " PID CIELO", UI_COL_CIELO, cb_goto_pid_cielo);
+    mk_bar_btn(scr, SCR_W - 92,  "CTRL " LV_SYMBOL_RIGHT,     UI_COL_TUNING, cb_goto_temp);
+
+    // Titolo interno
+    lv_obj_t* lt = lv_label_create(scr);
+    lv_label_set_text(lt, "Autotune PID CIELO");
+    lv_obj_set_style_text_font(lt, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(lt, UI_COL_TUNING, 0);
+    lv_obj_align(lt, LV_ALIGN_TOP_MID, 0, 40);
+
+    // Barra di avanzamento autotune
+    ui_AutoBar = lv_bar_create(scr);
+    lv_obj_set_size(ui_AutoBar, SCR_W - 40, 20);
+    lv_obj_align(ui_AutoBar, LV_ALIGN_TOP_MID, 0, 80);
+    lv_bar_set_range(ui_AutoBar, 0, 100);
+    lv_bar_set_value(ui_AutoBar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(ui_AutoBar, lv_color_make(0x18,0x18,0x28), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ui_AutoBar, UI_COL_TUNING, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(ui_AutoBar, 6, LV_PART_MAIN);
+    lv_obj_set_style_radius(ui_AutoBar, 6, LV_PART_INDICATOR);
+    lv_obj_set_style_border_width(ui_AutoBar, 0, LV_PART_MAIN);
+
+    ui_AutoLblStatus = lv_label_create(scr);
+    lv_label_set_text(ui_AutoLblStatus, "Stato: pronto");
+    lv_obj_set_style_text_font(ui_AutoLblStatus, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ui_AutoLblStatus, UI_COL_GRAY, 0);
+    lv_obj_align(ui_AutoLblStatus, LV_ALIGN_TOP_MID, 0, 110);
+
+    // Split BASE/CIELO
+    ui_AutoLblSplit = lv_label_create(scr);
+    lv_label_set_text(ui_AutoLblSplit, "Split B/C: --/--");
+    lv_obj_set_style_text_font(ui_AutoLblSplit, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ui_AutoLblSplit, UI_COL_GRAY, 0);
+    lv_obj_align(ui_AutoLblSplit, LV_ALIGN_TOP_MID, 0, 135);
+
+    // Righe temperatura + potenza
+    ui_AutoLblBase = lv_label_create(scr);
+    lv_label_set_text(ui_AutoLblBase, "BASE: ---\xC2\xB0""C  ---%");
+    lv_obj_set_style_text_font(ui_AutoLblBase, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ui_AutoLblBase, UI_COL_ACCENT, 0);
+    lv_obj_align(ui_AutoLblBase, LV_ALIGN_TOP_MID, 0, 165);
+
+    ui_AutoLblCielo = lv_label_create(scr);
+    lv_label_set_text(ui_AutoLblCielo, "CIELO: ---\xC2\xB0""C  ---%");
+    lv_obj_set_style_text_font(ui_AutoLblCielo, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ui_AutoLblCielo, UI_COL_CIELO, 0);
+    lv_obj_align(ui_AutoLblCielo, LV_ALIGN_TOP_MID, 0, 190);
+
+    // Pulsanti START / STOP in basso
+    lv_obj_t* bstart = lv_btn_create(scr);
+    lv_obj_set_pos(bstart, 40, 225); lv_obj_set_size(bstart, 160, 36);
+    lv_obj_set_style_bg_color(bstart, lv_color_make(0x00,0x28,0x14), 0);
+    lv_obj_set_style_border_color(bstart, UI_COL_GREEN, 0);
+    lv_obj_set_style_border_width(bstart, 2, 0);
+    lv_obj_set_style_radius(bstart, 8, 0);
+    lv_obj_set_style_shadow_width(bstart, 0, 0);
+    lv_obj_add_event_cb(bstart, cb_autotune_start, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* lst = lv_label_create(bstart);
+    lv_label_set_text(lst, LV_SYMBOL_PLAY " AVVIO");
+    lv_obj_set_style_text_font(lst, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(lst, UI_COL_GREEN, 0);
+    lv_obj_center(lst);
+
+    lv_obj_t* bstop = lv_btn_create(scr);
+    lv_obj_set_pos(bstop, SCR_W - 40 - 160, 225); lv_obj_set_size(bstop, 160, 36);
+    lv_obj_set_style_bg_color(bstop, lv_color_make(0x30,0x00,0x00), 0);
+    lv_obj_set_style_border_color(bstop, lv_color_make(0xFF,0x40,0x40), 0);
+    lv_obj_set_style_border_width(bstop, 2, 0);
+    lv_obj_set_style_radius(bstop, 8, 0);
+    lv_obj_set_style_shadow_width(bstop, 0, 0);
+    lv_obj_add_event_cb(bstop, cb_autotune_stop, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* lstp = lv_label_create(bstop);
+    lv_label_set_text(lstp, LV_SYMBOL_STOP " ARRESTO");
+    lv_obj_set_style_text_font(lstp, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(lstp, lv_color_make(0xFF,0x40,0x40), 0);
+    lv_obj_center(lstp);
+
+    // Nav inferiore rimosso: si usa il pulsante CTRL in alto a destra
+}
+
+// ================================================================
+//  BUILD GRAPH — canvas puro, senza lv_chart
+//  Layout 480x272:
+//    Header      y=0   h=32
+//    Scala Y     x=0   w=58  y=34  h=160  (label 0,100,200,300,400)
+//    Canvas      x=58  y=34  w=420 h=160  (GCVS_W x GCVS_H)
+//    Sep         y=196 h=2
+//    Info row    y=198 h=22
+//    Preset btns y=222 h=28  (tre bottoni 156px l'uno)
 // ================================================================
 static void build_graph() {
     #define GLIME lv_color_make(0x80,0xFF,0x40)
     #define GBG   lv_color_make(0x05,0x09,0x05)
     ui_ScreenGraph = make_screen(UI_COL_BG);
- 
-    // Header y=0..31
+
+    // ── Header y=0 h=32 ───────────────────────────────────────────
     lv_obj_t* hdr = lv_obj_create(ui_ScreenGraph);
     lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, SCR_W, 32);
     lv_obj_set_style_bg_color(hdr, GLIME, 0);
@@ -825,92 +991,93 @@ static void build_graph() {
     lv_obj_set_style_radius(hdr, 0, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
     lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t* lh = lv_label_create(hdr);
-    lv_label_set_text(lh, LV_SYMBOL_IMAGE " GRAFICO TEMPERATURE");
-    lv_obj_set_style_text_font(lh, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(lh, lv_color_black(), 0);
-    lv_obj_align(lh, LV_ALIGN_LEFT_MID, 6, 0);
-    lv_obj_t* leg_b = lv_label_create(hdr); lv_label_set_text(leg_b, "— BASE");
-    lv_obj_set_style_text_font(leg_b, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(leg_b, lv_color_make(0xFF,0x6B,0x00), 0);
-    lv_obj_align(leg_b, LV_ALIGN_RIGHT_MID, -116, 0);
-    lv_obj_t* leg_c = lv_label_create(hdr); lv_label_set_text(leg_c, "— CIELO");
-    lv_obj_set_style_text_font(leg_c, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(leg_c, lv_color_make(0xFF,0x30,0x30), 0);
-    lv_obj_align(leg_c, LV_ALIGN_RIGHT_MID, -2, 0);
- 
-    // Bottone OK (torna a MAIN)
-    lv_obj_t* bbk = lv_btn_create(ui_ScreenGraph);
-    lv_obj_set_pos(bbk, 404, 2); lv_obj_set_size(bbk, 64, 28);
-    lv_obj_set_style_bg_color(bbk, lv_color_make(0x30,0x60,0x10), 0);
-    lv_obj_set_style_bg_opa(bbk, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(bbk, 0, 0);
+
+    // Pulsante BACK (in header, a sinistra)
+    lv_obj_t* bbk = lv_btn_create(hdr);
+    lv_obj_set_pos(bbk, 2, 2); lv_obj_set_size(bbk, 74, 28);
+    lv_obj_set_style_bg_color(bbk, lv_color_make(0x10,0x28,0x08), 0);
+    lv_obj_set_style_border_color(bbk, GLIME, 0);
+    lv_obj_set_style_border_width(bbk, 1, 0);
     lv_obj_set_style_radius(bbk, 6, 0);
     lv_obj_set_style_shadow_width(bbk, 0, 0);
     lv_obj_add_event_cb(bbk, cb_goto_main_from_graph, LV_EVENT_CLICKED, NULL);
     lv_obj_t* lbk = lv_label_create(bbk); lv_label_set_text(lbk, LV_SYMBOL_LEFT " OK");
     lv_obj_set_style_text_font(lbk, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(lbk, GLIME, 0); lv_obj_center(lbk);
- 
-    // Scale Y labels — a sinistra del chart (x=0..31)
-    // Chart h=176, da y=32 a y=207
-    // 5 tacche: i=0 (0°C) a i=4 (400°C)
-    // y(i) = 204 - i*44   →  i=0: y=204, i=4: y=204-176=28 ✓ (dentro chart)
-    for (int i = 0; i <= 4; i++) {
-        int temp = i * 100;
-        int y = 204 - i * 44;
-        lv_obj_t* l = lv_label_create(ui_ScreenGraph);
-        char buf[8]; snprintf(buf, sizeof(buf), "%d", temp);
-        lv_label_set_text(l, buf);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(l, UI_COL_GRAY, 0);
-        lv_obj_set_pos(l, 2, y);
+
+    // Titolo (centro header)
+    lv_obj_t* lh = lv_label_create(hdr);
+    lv_label_set_text(lh, LV_SYMBOL_IMAGE " TEMPERATURE");
+    lv_obj_set_style_text_font(lh, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(lh, lv_color_black(), 0);
+    lv_obj_align(lh, LV_ALIGN_CENTER, 0, 0);
+
+    // Legenda (destra header, posizioni fisse per evitare overlap col titolo)
+    lv_obj_t* leg_b = lv_label_create(hdr); lv_label_set_text(leg_b, "BASE");
+    lv_obj_set_style_text_font(leg_b, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(leg_b, UI_COL_ACCENT, 0);
+    lv_obj_set_pos(leg_b, 380, 9);
+
+    lv_obj_t* leg_c = lv_label_create(hdr); lv_label_set_text(leg_c, "CIELO");
+    lv_obj_set_style_text_font(leg_c, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(leg_c, UI_COL_CIELO, 0);
+    lv_obj_set_pos(leg_c, 432, 9);
+
+    // ── Sfondo area grafico (bordo verde) ─────────────────────────
+    lv_obj_t* gbg = lv_obj_create(ui_ScreenGraph);
+    lv_obj_set_pos(gbg, GCVS_X - 1, GCVS_Y - 1);
+    lv_obj_set_size(gbg, GCVS_W + 2, GCVS_H + 2);
+    lv_obj_set_style_bg_color(gbg, GBG, 0);
+    lv_obj_set_style_bg_opa(gbg, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(gbg, lv_color_make(0x40,0x80,0x20), 0);
+    lv_obj_set_style_border_width(gbg, 1, 0);
+    lv_obj_set_style_radius(gbg, 2, 0);
+    lv_obj_clear_flag(gbg, LV_OBJ_FLAG_SCROLLABLE);
+
+    // ── Canvas dati ───────────────────────────────────────────────
+    s_canvas = lv_canvas_create(ui_ScreenGraph);
+    lv_obj_set_pos(s_canvas, GCVS_X, GCVS_Y);
+    lv_canvas_set_buffer(s_canvas, s_cbuf, GCVS_W, GCVS_H, LV_IMG_CF_TRUE_COLOR);
+    lv_canvas_fill_bg(s_canvas, GBG, LV_OPA_COVER);
+
+    // ── Label scala Y — x=2, aggiornate da ui_refresh_graph ───────
+    // Posizioni fisse: 5 label per 0,100,200,300,400
+    // y_screen(temp) = GCVS_Y + GCVS_H - 1 - temp*(GCVS_H-1)/400
+    for (int i = 0; i < 5; i++) {
+        s_ylbl[i] = lv_label_create(ui_ScreenGraph);
+        lv_label_set_text(s_ylbl[i], "");
+        lv_obj_set_style_text_font(s_ylbl[i], &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(s_ylbl[i], lv_color_make(0x70,0x80,0x70), 0);
+        lv_obj_set_pos(s_ylbl[i], 2, 0);  // y impostata da refresh
     }
- 
-    // Chart  y=32, h=176 → y_bottom=208
-    ui_Chart = lv_chart_create(ui_ScreenGraph);
-    lv_obj_set_pos(ui_Chart, 32, 32); lv_obj_set_size(ui_Chart, 446, 176);
-    lv_obj_set_style_bg_color(ui_Chart, GBG, 0);
-    lv_obj_set_style_bg_opa(ui_Chart, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(ui_Chart, GLIME, 0);
-    lv_obj_set_style_border_width(ui_Chart, 1, 0);
-    lv_chart_set_type(ui_Chart, LV_CHART_TYPE_LINE);
-    lv_chart_set_point_count(ui_Chart, 180);
-    lv_chart_set_range(ui_Chart, LV_CHART_AXIS_PRIMARY_Y, 0, 500);
-    lv_obj_set_style_size(ui_Chart, 0, LV_PART_INDICATOR);
-    lv_chart_set_div_line_count(ui_Chart, 5, 0);
-    lv_obj_set_style_line_color(ui_Chart, lv_color_make(0x20,0x30,0x20), LV_PART_MAIN);
- 
-    ui_SerBase  = lv_chart_add_series(ui_Chart, UI_COL_ACCENT,  LV_CHART_AXIS_PRIMARY_Y);
-    ui_SerCielo = lv_chart_add_series(ui_Chart, UI_COL_CIELO,   LV_CHART_AXIS_PRIMARY_Y);
- 
-    // Separatore  y=210
-    make_sep(ui_ScreenGraph, 210, lv_color_make(0x30,0x60,0x10));
- 
-    // Info labels  y=212 — non si sovrappongono tra loro né col separatore
+
+    // ── Separatore y=196 ──────────────────────────────────────────
+    make_sep(ui_ScreenGraph, GCVS_Y + GCVS_H + 2, lv_color_make(0x30,0x60,0x10));
+
+    // ── Info labels ───────────────────────────────────────────────
     ui_GraphTimeLbl = lv_label_create(ui_ScreenGraph);
-    lv_label_set_text(ui_GraphTimeLbl, "Ultimi 15 min");
+    lv_label_set_text(ui_GraphTimeLbl, "15 min");
     lv_obj_set_style_text_font(ui_GraphTimeLbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ui_GraphTimeLbl, UI_COL_GRAY, 0);
-    lv_obj_set_pos(ui_GraphTimeLbl, 32, 212);
- 
+    lv_obj_set_pos(ui_GraphTimeLbl, GCVS_X, GCVS_Y + GCVS_H + 4);
+
     ui_GraphMaxLbl = lv_label_create(ui_ScreenGraph);
     lv_label_set_text(ui_GraphMaxLbl, "");
-    lv_obj_set_pos(ui_GraphMaxLbl, 230, 212);
     lv_obj_set_style_text_font(ui_GraphMaxLbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(ui_GraphMaxLbl, UI_COL_GRAY, 0);
- 
+    lv_obj_set_style_text_color(ui_GraphMaxLbl, UI_COL_ACCENT, 0);
+    lv_obj_set_pos(ui_GraphMaxLbl, GCVS_X + 80, GCVS_Y + GCVS_H + 4);
+
     ui_GraphMinLbl = lv_label_create(ui_ScreenGraph);
     lv_label_set_text(ui_GraphMinLbl, "");
-    lv_obj_set_pos(ui_GraphMinLbl, 360, 212);
     lv_obj_set_style_text_font(ui_GraphMinLbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ui_GraphMinLbl, UI_COL_GRAY, 0);
- 
-    // Preset buttons  y=228, h=37 → y_end=265 < 272 ✓
+    lv_obj_set_pos(ui_GraphMinLbl, GCVS_X + 200, GCVS_Y + GCVS_H + 4);
+
+    // ── Preset buttons y=222 ──────────────────────────────────────
     auto make_preset = [](lv_obj_t* scr, int x, const char* txt,
                           lv_event_cb_t cb, bool active) -> lv_obj_t* {
         lv_obj_t* b = lv_btn_create(scr);
-        lv_obj_set_pos(b, x, 228); lv_obj_set_size(b, 156, 37);
+        lv_obj_set_pos(b, x, 222); lv_obj_set_size(b, 156, 28);
         lv_obj_set_style_bg_color(b, active ? GLIME : lv_color_make(0x0C,0x1C,0x0C), 0);
         lv_obj_set_style_border_color(b, GLIME, 0);
         lv_obj_set_style_border_width(b, 1, 0);
@@ -918,14 +1085,14 @@ static void build_graph() {
         lv_obj_set_style_shadow_width(b, 0, 0);
         lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
         lv_obj_t* l = lv_label_create(b); lv_label_set_text(l, txt);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(l, active ? lv_color_black() : GLIME, 0);
         lv_obj_center(l);
         return b;
     };
-    ui_BtnPreset5  = make_preset(ui_ScreenGraph,   2, "Ultimi 5 min",  cb_preset_5,  false);
-    ui_BtnPreset15 = make_preset(ui_ScreenGraph, 162, "Ultimi 15 min", cb_preset_15, true);
-    ui_BtnPreset30 = make_preset(ui_ScreenGraph, 322, "Ultimi 30 min", cb_preset_30, false);
+    ui_BtnPreset5  = make_preset(ui_ScreenGraph,   2, "5 min",  cb_preset_5,  false);
+    ui_BtnPreset15 = make_preset(ui_ScreenGraph, 162, "15 min", cb_preset_15, true);
+    ui_BtnPreset30 = make_preset(ui_ScreenGraph, 322, "30 min", cb_preset_30, false);
 }
 
 // ================================================================
@@ -953,22 +1120,23 @@ static void build_timer() {
     lv_obj_set_width(ui_LabelTimerValue, SCR_W);
     lv_obj_set_style_text_align(ui_LabelTimerValue, LV_TEXT_ALIGN_CENTER, 0);
 
-       lv_obj_set_pos(ui_LabelTimerValue, 0, 36);
+    lv_obj_set_pos(ui_LabelTimerValue, 0, 34);
  
-    make_pm(ui_ScreenTimer,  20,  96, 200, 46, "-1",  lv_color_make(0x80,0x80,0xFF), cb_timer_minus);
-    make_pm(ui_ScreenTimer, 260,  96, 200, 46, "+1",  lv_color_make(0x80,0x80,0xFF), cb_timer_plus);
-    make_pm(ui_ScreenTimer,  20, 146, 200, 40, "-15", lv_color_make(0x50,0x50,0xAA), cb_timer_minus15);
-    make_pm(ui_ScreenTimer, 260, 146, 200, 40, "+15", lv_color_make(0x50,0x50,0xAA), cb_timer_plus15);
+    make_pm(ui_ScreenTimer,  20,  92, 200, 38, "-1",  lv_color_make(0x80,0x80,0xFF), cb_timer_minus);
+    make_pm(ui_ScreenTimer, 260,  92, 200, 38, "+1",  lv_color_make(0x80,0x80,0xFF), cb_timer_plus);
+    make_pm(ui_ScreenTimer,  20, 133, 200, 36, "-15", lv_color_make(0x50,0x50,0xAA), cb_timer_minus15);
+    make_pm(ui_ScreenTimer, 260, 133, 200, 36, "+15", lv_color_make(0x50,0x50,0xAA), cb_timer_plus15);
  
     lv_obj_t* breset = lv_btn_create(ui_ScreenTimer);
-    lv_obj_set_pos(breset, 140, 190); lv_obj_set_size(breset, 200, 28);
+    lv_obj_set_pos(breset, 140, 172); lv_obj_set_size(breset, 200, 26);
     lv_obj_set_style_bg_color(breset, lv_color_make(0x30,0x00,0x00), 0);
     lv_obj_set_style_border_color(breset, lv_color_make(0xFF,0x40,0x40), 0);
     lv_obj_set_style_border_width(breset, 1, 0);
     lv_obj_set_style_radius(breset, 6, 0);
     lv_obj_set_style_shadow_width(breset, 0, 0);
     lv_obj_add_event_cb(breset, cb_timer_reset, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* lreset = lv_label_create(breset); lv_label_set_text(lreset, LV_SYMBOL_REFRESH " RESET");
+    lv_obj_t* lreset = lv_label_create(breset);
+    lv_label_set_text(lreset, LV_SYMBOL_REFRESH " RESET");
     lv_obj_set_style_text_font(lreset, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(lreset, lv_color_make(0xFF,0x40,0x40), 0);
     lv_obj_center(lreset);
@@ -979,7 +1147,7 @@ static void build_timer() {
     lv_obj_set_style_text_color(ui_LabelTimerStatus, UI_COL_GRAY, 0);
     lv_obj_set_width(ui_LabelTimerStatus, SCR_W);
     lv_obj_set_style_text_align(ui_LabelTimerStatus, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(ui_LabelTimerStatus, 0, 222);
+    lv_obj_set_pos(ui_LabelTimerStatus, 0, 202);
 }
 
 // ================================================================
@@ -1054,46 +1222,42 @@ void ui_init(void) {
     build_temp();
     build_pid_base();
     build_pid_cielo();
+    build_autotune();
     build_graph();
     build_timer();
     build_ricette();
     ui_build_wifi();
     ui_build_ota();
     ui_build_wifi_pwd();
+    ui_build_mqtt();
     lv_scr_load(ui_ScreenMain);
 }
 
 void ui_show_screen(Screen s) {
     g_state.active_screen = s;
     switch (s) {
-        // ← ANIMAZIONE 1+2: slide direzionale + fade-in su ogni schermata
         case Screen::MAIN:
-            lv_scr_load_anim(ui_ScreenMain,     LV_SCR_LOAD_ANIM_MOVE_RIGHT,  220, 0, false);
-            anim_fade_screen(ui_ScreenMain);     break;
+            lv_scr_load(ui_ScreenMain);          break;
         case Screen::TEMP:
-            lv_scr_load_anim(ui_ScreenTemp,     LV_SCR_LOAD_ANIM_MOVE_LEFT,   220, 0, false);
-            anim_fade_screen(ui_ScreenTemp);     break;
+            lv_scr_load(ui_ScreenTemp);          break;
         case Screen::PID_BASE:
-            lv_scr_load_anim(ui_ScreenPidBase,  LV_SCR_LOAD_ANIM_MOVE_TOP,    220, 0, false);
-            anim_fade_screen(ui_ScreenPidBase);  break;
+            lv_scr_load(ui_ScreenPidBase);       break;
         case Screen::PID_CIELO:
-            lv_scr_load_anim(ui_ScreenPidCielo, LV_SCR_LOAD_ANIM_MOVE_LEFT,   220, 0, false);
-            anim_fade_screen(ui_ScreenPidCielo); break;
+            lv_scr_load(ui_ScreenPidCielo);      break;
+        case Screen::AUTOTUNE:
+            lv_scr_load(ui_ScreenAutotune);      break;
         case Screen::GRAPH:
-            lv_scr_load_anim(ui_ScreenGraph,    LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 220, 0, false);
-            anim_fade_screen(ui_ScreenGraph);
-            anim_graph_intro(ui_Chart);          // ← ANIMAZIONE 18: chart slide-in
-            break;
+            lv_scr_load(ui_ScreenGraph);         break;
         case Screen::TIMER:
-            lv_scr_load_anim(ui_ScreenTimer,    LV_SCR_LOAD_ANIM_MOVE_TOP,    220, 0, false);
-            anim_fade_screen(ui_ScreenTimer);    break;
+            lv_scr_load(ui_ScreenTimer);         break;
         case Screen::RICETTE:
-            lv_scr_load_anim(ui_ScreenRicette,  LV_SCR_LOAD_ANIM_MOVE_TOP,    220, 0, false);
-            anim_fade_screen(ui_ScreenRicette);  break;
+            lv_scr_load(ui_ScreenRicette);       break;
         case Screen::WIFI_SCAN:
             ui_show_wifi_scan(); break;
         case Screen::WIFI_PWD:
             break;
+        case Screen::MQTT:
+            ui_show_mqtt(); break;
         case Screen::OTA:
             ui_show_ota(); break;
     }
@@ -1104,13 +1268,6 @@ void ui_show_screen(Screen s) {
 // ================================================================
 void ui_refresh(AppState* s) {
     if (!s) return;
-
-    // ← ANIMAZIONE 3: soglie per pulse temperatura (evita flash da jitter)
-    static float s_last_base  = -9999.f;
-    static float s_last_cielo = -9999.f;
-    // ← ANIMAZIONE 4: traccia stato relay per glow (evita chiamate ridondanti)
-    static bool s_relay_base_prev  = false;
-    static bool s_relay_cielo_prev = false;
 
     // Temperatura BASE
     if (s->tc_base_err) {
@@ -1124,11 +1281,6 @@ void ui_refresh(AppState* s) {
         lv_obj_set_style_text_color(ui_LabelTempBase,
             ui_temp_color(s->temp_base, s->set_base), 0);
         lv_label_set_text(ui_LabelErrBase, "");
-        // ← ANIMAZIONE 3: pulse se cambiato di almeno 1°
-        if (fabsf(s->temp_base - s_last_base) > 0.9f) {
-            anim_pulse_temp_label(ui_LabelTempBase);
-            s_last_base = s->temp_base;
-        }
     }
 
     // Temperatura CIELO
@@ -1143,43 +1295,38 @@ void ui_refresh(AppState* s) {
         lv_obj_set_style_text_color(ui_LabelTempCielo,
             ui_temp_color(s->temp_cielo, s->set_cielo), 0);
         lv_label_set_text(ui_LabelErrCielo, "");
-        // ← ANIMAZIONE 3
-        if (fabsf(s->temp_cielo - s_last_cielo) > 0.9f) {
-            anim_pulse_temp_label(ui_LabelTempCielo);
-            s_last_cielo = s->temp_cielo;
-        }
     }
 
-    // Barre PID animate
+    // Barre PID (senza animazioni)
     {
         int v = (int)s->pid_out_base;
-        anim_set_bar(ui_BarPidBase, v);   // ← ANIMAZIONE 8: LV_ANIM_ON
+        lv_bar_set_value(ui_BarPidBase, v, LV_ANIM_OFF);
         char buf[16]; snprintf(buf, sizeof(buf), "PID %d%%", v);
         lv_label_set_text(ui_LabelPidBase, buf);
     }
     {
         int v = (int)s->pid_out_cielo;
-        anim_set_bar(ui_BarPidCielo, v);  // ← ANIMAZIONE 8
+        lv_bar_set_value(ui_BarPidCielo, v, LV_ANIM_OFF);
         char buf[16]; snprintf(buf, sizeof(buf), "PID %d%%", v);
         lv_label_set_text(ui_LabelPidCielo, buf);
     }
 
-    // LED relay
-    if (s->relay_base)  lv_led_on(ui_LedRelayBase);  else lv_led_off(ui_LedRelayBase);
-    if (s->relay_cielo) lv_led_on(ui_LedRelayCielo); else lv_led_off(ui_LedRelayCielo);
-
-    // ← ANIMAZIONE 9: lampeggio LED all'attivazione
-    if (s->relay_base  && !s_relay_base_prev)  anim_relay_led_on(ui_LedRelayBase);
-    if (s->relay_cielo && !s_relay_cielo_prev) anim_relay_led_on(ui_LedRelayCielo);
-
-    // ← ANIMAZIONE 4: glow pulsante ON attivo / stop glow quando OFF
-    if (s->relay_base)  anim_glow_relay_btn(ui_BtnEnBase,  UI_COL_ACCENT);
-    else                anim_stop_glow(ui_BtnEnBase);
-    if (s->relay_cielo) anim_glow_relay_btn(ui_BtnEnCielo, UI_COL_CIELO);
-    else                anim_stop_glow(ui_BtnEnCielo);
-
-    s_relay_base_prev  = s->relay_base;
-    s_relay_cielo_prev = s->relay_cielo;
+    // LED relay — animazione doppio flash quando si accendono
+    static bool s_prev_relay_base = false, s_prev_relay_cielo = false;
+    if (s->relay_base) {
+        if (!s_prev_relay_base) anim_relay_led_on(ui_LedRelayBase);
+        lv_led_on(ui_LedRelayBase);
+    } else {
+        lv_led_off(ui_LedRelayBase);
+    }
+    if (s->relay_cielo) {
+        if (!s_prev_relay_cielo) anim_relay_led_on(ui_LedRelayCielo);
+        lv_led_on(ui_LedRelayCielo);
+    } else {
+        lv_led_off(ui_LedRelayCielo);
+    }
+    s_prev_relay_base  = s->relay_base;
+    s_prev_relay_cielo = s->relay_cielo;
 
     // Bottoni ON/OFF BASE
     if (s->base_enabled) {
@@ -1252,11 +1399,8 @@ void ui_refresh(AppState* s) {
         char buf[64];
         snprintf(buf, sizeof(buf), LV_SYMBOL_WARNING "  SHUTDOWN — %s", reason);
         lv_label_set_text(ui_LabelSafety, buf);
-        // ← ANIMAZIONE 11: banner flash urgente
-        anim_safety_banner(ui_PanelSafety);
     } else {
         lv_obj_add_flag(ui_PanelSafety, LV_OBJ_FLAG_HIDDEN);
-        anim_safety_banner_stop(ui_PanelSafety);
     }
 
     // Status bar
@@ -1270,38 +1414,53 @@ void ui_refresh(AppState* s) {
         lv_label_set_text(ui_LabelStatus, LV_SYMBOL_WARNING " Preriscaldo in corso...");
         lv_obj_set_style_text_color(ui_LabelStatus, UI_COL_ACCENT2, 0);
     } else {
-        char buf[48];
-        snprintf(buf, sizeof(buf), "B:%.0f/%.0f\xC2\xB0  C:%.0f/%.0f\xC2\xB0",
-            s->temp_base, s->set_base, s->temp_cielo, s->set_cielo);
+        char buf[56];
+        if (s->tc_base_err && s->tc_cielo_err)
+            snprintf(buf, sizeof(buf), "B:ERR/%.0f\xC2\xB0  C:ERR/%.0f\xC2\xB0", s->set_base, s->set_cielo);
+        else if (s->tc_base_err)
+            snprintf(buf, sizeof(buf), "B:ERR/%.0f\xC2\xB0  C:%.0f/%.0f\xC2\xB0", s->set_base, s->temp_cielo, s->set_cielo);
+        else if (s->tc_cielo_err)
+            snprintf(buf, sizeof(buf), "B:%.0f/%.0f\xC2\xB0  C:ERR/%.0f\xC2\xB0", s->temp_base, s->set_base, s->set_cielo);
+        else
+            snprintf(buf, sizeof(buf), "B:%.0f/%.0f\xC2\xB0  C:%.0f/%.0f\xC2\xB0",
+                s->temp_base, s->set_base, s->temp_cielo, s->set_cielo);
         lv_label_set_text(ui_LabelStatus, buf);
         lv_obj_set_style_text_color(ui_LabelStatus, UI_COL_GRAY, 0);
     }
 
-    // ← ANIMAZIONE 15: fan LED breathing
-    {
-        static bool s_fan_prev = false;
-        if (s->fan_on && !s_fan_prev) {
-            lv_led_on(ui_LedFan);
-            anim_fan_breathing_start(ui_LedFan);
-        } else if (!s->fan_on && s_fan_prev) {
-            anim_fan_breathing_stop(ui_LedFan);
-            lv_led_off(ui_LedFan);
-        }
-        s_fan_prev = s->fan_on;
+    // Fan LED — animazione breathing quando ventola ON (solo su transizione)
+    static bool s_prev_fan_on = false;
+    if (s->fan_on) {
+        if (!s_prev_fan_on) anim_fan_breathing_start(ui_LedFan);
+        lv_led_on(ui_LedFan);
+    } else {
+        if (s_prev_fan_on) anim_fan_breathing_stop(ui_LedFan);
+        lv_led_off(ui_LedFan);
     }
+    s_prev_fan_on = s->fan_on;
 
-    // ← ANIMAZIONE 14: barra preheat con colore termico
-    if (s->preheat_base && !s->tc_base_err && s->set_base > 0)
-        anim_preheat_bar(ui_BarPreheatBase,
-                         (int)(s->temp_base / s->set_base * 100.0));
-    else
-        anim_preheat_bar_stop(ui_BarPreheatBase);
-
-    if (s->preheat_cielo && !s->tc_cielo_err && s->set_cielo > 0)
-        anim_preheat_bar(ui_BarPreheatCielo,
-                         (int)(s->temp_cielo / s->set_cielo * 100.0));
-    else
-        anim_preheat_bar_stop(ui_BarPreheatCielo);
+    // Barre preheat (senza animazioni)
+    auto upd_preheat = [](lv_obj_t* bar, bool pre, bool tc_err, double t, double sp) {
+        if (!bar) return;
+        if (pre && !tc_err && sp > 0.0) {
+            int pct = (int)(t / sp * 100.0);
+            if (pct < 0) pct = 0;
+            if (pct > 100) pct = 100;
+            lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
+            lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+            lv_color_t col;
+            if      (pct < 40) col = lv_color_make(0x00, 0x80, 0xFF);
+            else if (pct < 70) col = lv_color_make(0xFF, 0x9E, 0x40);
+            else if (pct < 92) col = lv_color_make(0xFF, 0x6B, 0x00);
+            else               col = UI_COL_GREEN;
+            lv_obj_set_style_bg_color(bar, col, LV_PART_INDICATOR);
+        } else {
+            lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+            lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+        }
+    };
+    upd_preheat(ui_BarPreheatBase,  s->preheat_base,  s->tc_base_err,  s->temp_base,  s->set_base);
+    upd_preheat(ui_BarPreheatCielo, s->preheat_cielo, s->tc_cielo_err, s->temp_cielo, s->set_cielo);
 }
 
 // ================================================================
@@ -1309,10 +1468,9 @@ void ui_refresh(AppState* s) {
 // ================================================================
 void ui_refresh_temp(AppState* s) {
     if (!s) return;
-
-    // ← ANIMAZIONE 10: archi setpoint con transizione animata
-    anim_arc_set_value(ui_ArcBase,  (int)s->set_base);
-    anim_arc_set_value(ui_ArcCielo, (int)s->set_cielo);
+    // Archi setpoint (senza animazioni)
+    if (ui_ArcBase)  lv_arc_set_value(ui_ArcBase,  (int16_t)s->set_base);
+    if (ui_ArcCielo) lv_arc_set_value(ui_ArcCielo, (int16_t)s->set_cielo);
 
     char buf[20];
     snprintf(buf, sizeof(buf), "%.0f\xC2\xB0""C", s->set_base);
@@ -1320,9 +1478,9 @@ void ui_refresh_temp(AppState* s) {
     snprintf(buf, sizeof(buf), "%.0f\xC2\xB0""C", s->set_cielo);
     lv_label_set_text(ui_TempSetCielo, buf);
 
-    // Barre PID CTRL animate
-    anim_set_bar(ui_TempBarBase,  (int)s->pid_out_base);
-    anim_set_bar(ui_TempBarCielo, (int)s->pid_out_cielo);
+    // Barre PID CTRL (senza animazioni)
+    lv_bar_set_value(ui_TempBarBase,  (int)s->pid_out_base,  LV_ANIM_OFF);
+    lv_bar_set_value(ui_TempBarCielo, (int)s->pid_out_cielo, LV_ANIM_OFF);
 
     lv_label_set_text(ui_TempErrBase,  s->tc_base_err  ? "TC ERR" : "");
     lv_label_set_text(ui_TempErrCielo, s->tc_cielo_err ? "TC ERR" : "");
@@ -1365,7 +1523,9 @@ void ui_refresh_temp(AppState* s) {
         lv_label_set_text(ui_LabelMode, LV_SYMBOL_PAUSE " SINGLE");
         lv_obj_set_style_text_color(ui_LabelMode, UI_COL_SINGLE, 0);
         lv_obj_set_style_border_color(ui_BtnModeToggle, UI_COL_SINGLE, 0);
-        lv_obj_add_flag(ui_PanelSplit, LV_OBJ_FLAG_HIDDEN);
+        // In modalità SINGLE mostriamo comunque la parzializzazione,
+        // così il valore di BASE è sempre visibile.
+        lv_obj_clear_flag(ui_PanelSplit, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_label_set_text(ui_LabelMode, LV_SYMBOL_SHUFFLE " DUAL");
         lv_obj_set_style_text_color(ui_LabelMode, UI_COL_DUAL, 0);
@@ -1398,55 +1558,235 @@ void ui_refresh_pid(AppState* s) {
     snprintf(buf, sizeof(buf), "Set: %.0f\xC2\xB0""C", s->set_cielo);
     lv_label_set_text(ui_LblSetCieloTun, buf);
 
-    // ← ANIMAZIONE 19: barra indeterminate durante autotune
     if (ui_BarAutotune) {
         if (s->autotune_status == AutotuneStatus::RUNNING) {
-            anim_autotune_bar_start(ui_BarAutotune);
+            // Nelle schermate PID mostriamo una barra fissa al 50%
+            lv_obj_clear_flag(ui_BarAutotune, LV_OBJ_FLAG_HIDDEN);
+            lv_bar_set_value(ui_BarAutotune, 50, LV_ANIM_OFF);
         } else {
-            anim_autotune_bar_stop(ui_BarAutotune, s->autotune_cycles);
+            lv_bar_set_value(ui_BarAutotune, s->autotune_cycles > 0 ? 100 : 0, LV_ANIM_OFF);
+            lv_obj_add_flag(ui_BarAutotune, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
 
 // ================================================================
+//  ui_refresh_autotune — aggiorna schermata AUTOTUNE PID
+// ================================================================
+void ui_refresh_autotune(AppState* s) {
+    if (!s || !ui_ScreenAutotune) return;
+
+    // Barra avanzamento: anim indeterminata quando RUNNING
+    if (ui_AutoBar) {
+        if (s->autotune_status == AutotuneStatus::RUNNING) {
+            anim_autotune_bar_start(ui_AutoBar);
+        } else {
+            anim_autotune_bar_stop(ui_AutoBar, s->autotune_cycles);
+        }
+    }
+
+    // Stato autotune
+    if (ui_AutoLblStatus) {
+        const char* txt = "Stato: pronto";
+        switch (s->autotune_status) {
+            case AutotuneStatus::IDLE:     txt = "Stato: pronto";                     break;
+            case AutotuneStatus::RUNNING:  txt = "Stato: in corso...";               break;
+            case AutotuneStatus::DONE:     txt = "Stato: completato";                break;
+            case AutotuneStatus::ABORTED:  txt = "Stato: interrotto";                break;
+        }
+        lv_label_set_text(ui_AutoLblStatus, txt);
+    }
+
+    // Split BASE/CIELO usato per autotune
+    if (ui_AutoLblSplit) {
+        int split_b = s->autotune_split;
+        if (split_b <= 0 || split_b >= 100) split_b = s->pct_base;
+        int split_c = 100 - split_b;
+        char buf[48];
+        snprintf(buf, sizeof(buf), "Split B/C: %d%% / %d%%", split_b, split_c);
+        lv_label_set_text(ui_AutoLblSplit, buf);
+    }
+
+    // Temperature + percentuali resistenze attuali (ERR se sonda non rilevata)
+    if (ui_AutoLblBase) {
+        char buf[64];
+        if (s->tc_base_err)
+            snprintf(buf, sizeof(buf), "BASE: ERR  %3.0f%%", s->pid_out_base);
+        else
+            snprintf(buf, sizeof(buf), "BASE: %.0f\xC2\xB0""C  %3.0f%%",
+                     s->temp_base, s->pid_out_base);
+        lv_label_set_text(ui_AutoLblBase, buf);
+    }
+    if (ui_AutoLblCielo) {
+        char buf[64];
+        if (s->tc_cielo_err)
+            snprintf(buf, sizeof(buf), "CIELO: ERR  %3.0f%%", s->pid_out_cielo);
+        else
+            snprintf(buf, sizeof(buf), "CIELO: %.0f\xC2\xB0""C  %3.0f%%",
+                     s->temp_cielo, s->pid_out_cielo);
+        lv_label_set_text(ui_AutoLblCielo, buf);
+    }
+}
+
+// ================================================================
 //  ui_refresh_graph — aggiorna grafico
+//
+//  LVGL 8.3 — API corretta per popolare un line chart:
+//
+//  1. lv_chart_set_all_value(chart, ser, LV_CHART_POINT_NONE)
+//     Azzera tutti i punti. L'array interno e' ser->points[0..N-1].
+//
+//  2. ser->points[i] = valore   (scrittura diretta, LVGL 8.3)
+//     Confermato dagli esempi ufficiali LVGL 8.3: ser2->points[0] = 90;
+//     NON usare lv_chart_set_value_by_id() — non esiste in 8.3 (e' 9.x)
+//     NON usare ser->y_points[]              — non esiste in 8.3 (e' 9.x)
+//     NON usare lv_chart_set_next_value() in loop: sposta il write-pointer
+//     interno e produce curve sfasate.
+//
+//  3. lv_chart_refresh(chart) — ridisegna.
+//
+//  Ordine: i=0 = campione piu' vecchio (sinistra), i=count-1 = piu' recente.
+// ================================================================
+// ================================================================
+//  ui_refresh_graph — ridisegna il canvas da zero ogni volta
+//  Approccio: lv_canvas_draw_line() punto per punto.
+//  Nessun lv_chart, nessuna animazione, nessun ring buffer interno.
 // ================================================================
 void ui_refresh_graph(AppState* s) {
-    if (!s || !ui_Chart) return;
+    if (!s || !s_canvas) return;
     int samples = (g_graph_minutes * 60) / GRAPH_SAMPLE_S;
     if (samples > GRAPH_BUF_SIZE) samples = GRAPH_BUF_SIZE;
-    if (g_graph.count == 0) return;
 
-    lv_chart_set_point_count(ui_Chart, samples);
-    lv_chart_set_all_value(ui_Chart, ui_SerBase,  LV_CHART_POINT_NONE);
-    lv_chart_set_all_value(ui_Chart, ui_SerCielo, LV_CHART_POINT_NONE);
-
-    float max_t = -1.f, min_t = 9999.f;
-    int count = (g_graph.count < (uint16_t)samples) ? g_graph.count : samples;
+    // ── Calcola range Y sul contenuto reale ───────────────────────
+    float max_t = 50.f, min_t = 9999.f;
+    int count = (g_graph.count < (uint16_t)samples) ? (int)g_graph.count : samples;
     for (int i = 0; i < count; i++) {
-        int idx = (g_graph.head - count + i + GRAPH_BUF_SIZE) % GRAPH_BUF_SIZE;
-        float tb = g_graph.base[idx];
-        float tc = g_graph.cielo[idx];
-        lv_chart_set_next_value(ui_Chart, ui_SerBase,  (lv_coord_t)tb);
-        lv_chart_set_next_value(ui_Chart, ui_SerCielo, (lv_coord_t)tc);
+        int ri = (g_graph.head - count + i + GRAPH_BUF_SIZE) % GRAPH_BUF_SIZE;
+        float tb = g_graph.base[ri];
+        float tc = g_graph.cielo[ri];
         if (tb > max_t) max_t = tb;
         if (tc > max_t) max_t = tc;
-        if (tb < min_t) min_t = tb;
-        if (tc < min_t) min_t = tc;
+        if (tb > 0.f && tb < min_t) min_t = tb;
+        if (tc > 0.f && tc < min_t) min_t = tc;
     }
-    lv_chart_refresh(ui_Chart);
+    if (min_t > max_t) min_t = 0.f;
+    // Arrotonda a multipli di 50 con margine
+    s_graph_y_min = ((int)(min_t - 20.f) / 50) * 50;
+    s_graph_y_max = (((int)(max_t + 30.f) + 49) / 50) * 50;
+    if (s_graph_y_min < 0)   s_graph_y_min = 0;
+    if (s_graph_y_max > 500) s_graph_y_max = 500;
+    if (s_graph_y_max - s_graph_y_min < 50) s_graph_y_max = s_graph_y_min + 50;
+    int yrange = s_graph_y_max - s_graph_y_min;
 
-    char buf[24];
-    if (max_t > 0) { snprintf(buf, sizeof(buf), "Max %.0f\xC2\xB0", max_t); lv_label_set_text(ui_GraphMaxLbl, buf); }
-    if (min_t < 9999) { snprintf(buf, sizeof(buf), "Min %.0f\xC2\xB0", min_t); lv_label_set_text(ui_GraphMinLbl, buf); }
+    // ── Pulisci canvas ────────────────────────────────────────────
+    #define GBG lv_color_make(0x05,0x09,0x05)
+    lv_canvas_fill_bg(s_canvas, GBG, LV_OPA_COVER);
+
+    // ── Disegna linee griglia orizzontali ─────────────────────────
+    lv_draw_line_dsc_t gdsc;
+    lv_draw_line_dsc_init(&gdsc);
+    gdsc.width   = 1;
+    gdsc.color   = lv_color_make(0x18,0x30,0x10);
+    gdsc.opa     = LV_OPA_COVER;
+    gdsc.round_start = 0; gdsc.round_end = 0;
+
+    // Tacche ogni 50°C all'interno del range
+    int step = (yrange <= 100) ? 25 : 50;
+    for (int t = s_graph_y_min; t <= s_graph_y_max; t += step) {
+        int yp = GCVS_H - 1 - (int)((float)(t - s_graph_y_min) / yrange * (GCVS_H - 1));
+        if (yp < 0 || yp >= GCVS_H) continue;
+        lv_point_t pts[2] = {{0,(lv_coord_t)yp},{GCVS_W-1,(lv_coord_t)yp}};
+        lv_canvas_draw_line(s_canvas, pts, 2, &gdsc);
+    }
+
+    if (count < 2) goto refresh_labels;
+
+    {
+        // ── Mappa campioni→pixel X ─────────────────────────────────
+        // Il campione più vecchio va a x=0, il più recente a x=GCVS_W-1
+        // Funzione conversione Y: yp = (GCVS_H-1) - (val-ymin)/(yrange)*(GCVS_H-1)
+        auto val2y = [&](float v) -> lv_coord_t {
+            int yp = (GCVS_H - 1) - (int)((v - s_graph_y_min) / yrange * (GCVS_H - 1));
+            if (yp < 0) yp = 0;
+            if (yp >= GCVS_H) yp = GCVS_H - 1;
+            return (lv_coord_t)yp;
+        };
+
+        lv_draw_line_dsc_t ldsc;
+        lv_draw_line_dsc_init(&ldsc);
+        ldsc.width   = 2;
+        ldsc.opa     = LV_OPA_COVER;
+        ldsc.round_start = 1; ldsc.round_end = 1;
+
+        // ── Disegna serie BASE (arancio) ───────────────────────────
+        ldsc.color = UI_COL_ACCENT;
+        for (int i = 1; i < count; i++) {
+            int ri0 = (g_graph.head - count + (i-1) + GRAPH_BUF_SIZE) % GRAPH_BUF_SIZE;
+            int ri1 = (g_graph.head - count + i     + GRAPH_BUF_SIZE) % GRAPH_BUF_SIZE;
+            float tb0 = g_graph.base[ri0];
+            float tb1 = g_graph.base[ri1];
+            if (tb0 <= 0.f || tb1 <= 0.f) continue;
+            lv_coord_t x0 = (lv_coord_t)((i-1) * (GCVS_W-1) / (count-1));
+            lv_coord_t x1 = (lv_coord_t)(i     * (GCVS_W-1) / (count-1));
+            lv_point_t pts[2] = {{x0, val2y(tb0)}, {x1, val2y(tb1)}};
+            lv_canvas_draw_line(s_canvas, pts, 2, &ldsc);
+        }
+
+        // ── Disegna serie CIELO (rosso) ────────────────────────────
+        ldsc.color = UI_COL_CIELO;
+        for (int i = 1; i < count; i++) {
+            int ri0 = (g_graph.head - count + (i-1) + GRAPH_BUF_SIZE) % GRAPH_BUF_SIZE;
+            int ri1 = (g_graph.head - count + i     + GRAPH_BUF_SIZE) % GRAPH_BUF_SIZE;
+            float tc0 = g_graph.cielo[ri0];
+            float tc1 = g_graph.cielo[ri1];
+            if (tc0 <= 0.f || tc1 <= 0.f) continue;
+            lv_coord_t x0 = (lv_coord_t)((i-1) * (GCVS_W-1) / (count-1));
+            lv_coord_t x1 = (lv_coord_t)(i     * (GCVS_W-1) / (count-1));
+            lv_point_t pts[2] = {{x0, val2y(tc0)}, {x1, val2y(tc1)}};
+            lv_canvas_draw_line(s_canvas, pts, 2, &ldsc);
+        }
+    }
+
+    refresh_labels:
+    // ── Aggiorna label scala Y ────────────────────────────────────
+    {
+        int step2 = (yrange <= 100) ? 25 : 50;
+        int li = 0;
+        for (int t = s_graph_y_min; t <= s_graph_y_max && li < 5; t += step2, li++) {
+            int yp = (int)((float)(t - s_graph_y_min) / yrange * (GCVS_H - 1));
+            int y_screen = GCVS_Y + GCVS_H - 1 - yp - 5;  // -5 per centrare font10
+            char buf[8]; snprintf(buf, sizeof(buf), "%d", t);
+            lv_label_set_text(s_ylbl[li], buf);
+            lv_obj_set_pos(s_ylbl[li], 2, y_screen);
+        }
+        // Nascondi le label non usate
+        for (int i = li; i < 5; i++) lv_label_set_text(s_ylbl[i], "");
+    }
+
+    // ── Aggiorna label info ────────────────────────────────────────
+    {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d min", g_graph_minutes);
+        lv_label_set_text(ui_GraphTimeLbl, buf);
+
+        if (max_t > 50.f) {
+            snprintf(buf, sizeof(buf), "Max B:%.0f C:%.0f", s->temp_base, s->temp_cielo);
+            lv_label_set_text(ui_GraphMaxLbl, buf);
+        }
+        if (min_t < 9999.f && count > 2) {
+            snprintf(buf, sizeof(buf), "Min %.0f", min_t);
+            lv_label_set_text(ui_GraphMinLbl, buf);
+        }
+    }
+
+    lv_obj_invalidate(s_canvas);
 }
 
 // ================================================================
 //  ui_timer_auto_start / ui_timer_tick_1s
 //  (implementazione minima — la logica reale è in ui_events.cpp)
 // ================================================================
-void ui_timer_auto_start(void) { /* gestito da ui_events */ }
-void ui_timer_tick_1s(void)    { /* gestito da ui_events */ }
+// Implementate in ui_events.cpp
 
 // ================================================================
 //  ui_show_toast — wrapper pubblico per ANIM 16
@@ -1455,7 +1795,6 @@ void ui_timer_tick_1s(void)    { /* gestito da ui_events */ }
 //  Esempio: ui_show_toast("MQTT: setpoint aggiornato");
 // ================================================================
 void ui_show_toast(const char* msg) {
-    lv_obj_t* scr = lv_scr_act();
-    if (!scr) return;
-    anim_toast_show(scr, msg, &s_toast_ref);
+    (void)msg;
+    // Animazioni/overlay disattivati per ora.
 }

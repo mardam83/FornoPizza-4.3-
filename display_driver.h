@@ -367,7 +367,7 @@ void display_init() {
   );
 
   Serial.println("[DISP] s_gfx->begin() ...");
-  if (!s_gfx->begin(40000000UL)) {
+  if (!s_gfx->begin(20000000UL)) {
     Serial.println("[DISP] ERRORE: begin() fallito! Verifica cablaggio QSPI.");
   } else {
     Serial.printf("[DISP] NV3041A OK  %dx%d\n", s_gfx->width(), s_gfx->height());

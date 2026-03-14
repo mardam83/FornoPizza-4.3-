@@ -23,11 +23,11 @@
 // ================================================================
 
 // Task PID: lettura TC, calcolo PID, relay duty cycle
-#define TASK_PID_ENABLE       0   // [PROD] 1
+#define TASK_PID_ENABLE       1   // [PROD] 1
 
 // Task Watchdog: supervisione heartbeat Task_PID
 // ⚠ DEVE essere 0 se TASK_PID_ENABLE=0 (altrimenti WDG timeout immediato)
-#define TASK_WDG_ENABLE       0   // [PROD] 1
+#define TASK_WDG_ENABLE       1   // [PROD] 1
 
 // Task LVGL: rendering UI, refresh schermate
 #define TASK_LVGL_ENABLE      1
@@ -39,9 +39,9 @@
 //  FEATURE ENABLE
 // ================================================================
 #define FEATURE_SPLASH        1
-#define FEATURE_SAFETY        0   // [PROD] 1
-#define FEATURE_AUTOTUNE      0
-#define FEATURE_OTA           0
+#define FEATURE_SAFETY        1   // [PROD] 1
+#define FEATURE_AUTOTUNE      1
+#define FEATURE_OTA           1
 
 // ================================================================
 //  LOG SERIALE — livelli per modulo

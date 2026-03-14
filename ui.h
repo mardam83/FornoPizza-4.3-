@@ -20,8 +20,20 @@ enum class AutotuneStatus { IDLE=0, RUNNING=1, DONE=2, ABORTED=3 };
 enum class SafetyReason   { NONE=0, TC_ERROR=1, OVERTEMP=2,
                             RUNAWAY_DOWN=3, RUNAWAY_UP=4, WDG_TIMEOUT=5 };
 enum class SensorMode     { SINGLE, DUAL };
-enum class Screen         { MAIN, TEMP, PID_BASE, PID_CIELO, GRAPH,
-                            WIFI_SCAN, WIFI_PWD, OTA, TIMER, RICETTE };
+enum class Screen         {
+  MAIN,
+  TEMP,
+  PID_BASE,
+  PID_CIELO,
+  AUTOTUNE,     // nuova schermata autotune PID
+  GRAPH,
+  WIFI_SCAN,
+  WIFI_PWD,
+  MQTT,         // configurazione broker MQTT
+  OTA,
+  TIMER,
+  RICETTE
+};
 
 // ----------------------------------------------------------------
 //  STATO APPLICAZIONE — in SRAM interna (accesso real-time da Task_PID)
@@ -200,6 +212,16 @@ extern lv_obj_t* ui_LabelTimerValue;
 extern lv_obj_t* ui_LabelTimerStatus;
 
 // ================================================================
+//  WIDGET — AUTOTUNE PID
+// ================================================================
+extern lv_obj_t* ui_ScreenAutotune;
+extern lv_obj_t* ui_AutoBar;
+extern lv_obj_t* ui_AutoLblStatus;
+extern lv_obj_t* ui_AutoLblSplit;
+extern lv_obj_t* ui_AutoLblBase;
+extern lv_obj_t* ui_AutoLblCielo;
+
+// ================================================================
 //  COLORI UI — definiti qui così sono visibili a ui.cpp, ui_events.cpp, ecc.
 // ================================================================
 #define UI_COL_BG        lv_color_make(0x10,0x10,0x1A)
@@ -237,6 +259,7 @@ void ui_refresh_pid(AppState* s);
 void ui_refresh_graph(AppState* s);
 void ui_timer_auto_start();
 void ui_timer_tick_1s();
+void ui_refresh_autotune(AppState* s);
 
 // ================================================================
 //  VARIABILI GLOBALI

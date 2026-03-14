@@ -60,7 +60,19 @@ extern lv_obj_t* ui_OtaBar;            // barra progresso
 extern lv_obj_t* ui_OtaBarLbl;         // "0 %"
 extern lv_obj_t* ui_BtnOtaStart;       // pulsante avvia
 extern lv_obj_t* ui_BtnOtaBack;        // pulsante indietro
-extern lv_obj_t* ui_OtaStatusLbl;      // feedback OTA
+extern lv_obj_t* ui_OtaStatusLbl;     // feedback OTA
+
+// ----------------------------------------------------------------
+//  WIDGET — MQTT (broker)
+// ----------------------------------------------------------------
+extern lv_obj_t* ui_ScreenMqtt;
+extern lv_obj_t* ui_MqttHostTA;        // IP/host broker
+extern lv_obj_t* ui_MqttPortTA;        // porta (default 1883)
+extern lv_obj_t* ui_MqttUserTA;        // username
+extern lv_obj_t* ui_MqttPassTA;        // password
+extern lv_obj_t* ui_BtnMqttToWifi;     // navigazione → WiFi
+extern lv_obj_t* ui_BtnMqttToMain;     // navigazione → Main
+extern lv_obj_t* ui_MqttBtnLbl;        // label pulsante MQTT in header WiFi (Connesso/Non connesso)
 
 // ----------------------------------------------------------------
 //  STATO WIFI SCAN (thread-safe via flag atomici)
@@ -98,10 +110,12 @@ extern char          g_ota_status_msg[64];
 void ui_build_wifi(void);           // chiamata da ui_init()
 void ui_build_wifi_pwd(void);
 void ui_build_ota(void);            // chiamata da ui_init()
+void ui_build_mqtt(void);           // chiamata da ui_init()
 
 void ui_show_wifi_scan(void);       // naviga a WIFI_SCAN
 void ui_show_wifi_pwd(const char* ssid); // naviga a WIFI_PWD
 void ui_show_ota(void);             // naviga a OTA
+void ui_show_mqtt(void);            // naviga a MQTT
 
 // Chiamate SOLO da Task_LVGL (thread-safe)
 void ui_wifi_update_list(void);     // rinnova la lista reti

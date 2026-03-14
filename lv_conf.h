@@ -106,7 +106,7 @@
 #define LV_FONT_MONTSERRAT_18  1
 #define LV_FONT_MONTSERRAT_20  0
 #define LV_FONT_MONTSERRAT_22  1
-#define LV_FONT_MONTSERRAT_24  0
+#define LV_FONT_MONTSERRAT_24  1
 #define LV_FONT_MONTSERRAT_26  0
 #define LV_FONT_MONTSERRAT_28  1
 #define LV_FONT_MONTSERRAT_30  0
@@ -148,7 +148,7 @@
 #define LV_USE_BAR       1
 #define LV_USE_BTN       1
 #define LV_USE_BTNMATRIX 1
-#define LV_USE_CANVAS    0
+#define LV_USE_CANVAS    1
 #define LV_USE_CHECKBOX  0
 #define LV_USE_DROPDOWN  0
 #define LV_USE_IMG       1

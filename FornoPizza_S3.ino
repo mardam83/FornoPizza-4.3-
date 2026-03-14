@@ -61,6 +61,21 @@
   #include "autotune.h"
 #endif
 
+// ================================================================
+//  PARAMETRI CONTROLLO RELAY (override da hardware.h se definiti)
+// ================================================================
+// Finestra di modulazione per i relay meccanici (ms)
+// Valore di default: 30000ms (30s) se non ridefinito in hardware.h
+#ifndef RELAY_WINDOW_MS
+#define RELAY_WINDOW_MS  30000UL
+#endif
+
+// Duty-cycle minimo (percento) al di sotto del quale il relay resta OFF
+// Valore di default: 5% se non ridefinito in hardware.h
+#ifndef RELAY_MIN_DUTY_PCT
+#define RELAY_MIN_DUTY_PCT  5
+#endif
+
 #if FEATURE_OTA && TASK_WIFI_ENABLE
   #include "ota_manager.h"
   #include "web_ota.h"
@@ -214,10 +229,16 @@ static void Task_PID(void* param) {
     if (g_emergency_shutdown) {
       RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  false);
       RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, false);
-      bool fan = (g_state.temp_cielo > FAN_OFF_TEMP);
-      if (fan != g_state.fan_on) {
-        g_state.fan_on = fan;
-        RELAY_WRITE(RELAY_FAN, RELAY_FAN_INV, fan);
+
+      // In emergenza la ventola resta accesa finché almeno un sensore attivo è sopra soglia
+      bool hot = (!g_state.tc_cielo_err && g_state.temp_cielo > FAN_OFF_TEMP);
+      if (g_state.sensor_mode == SensorMode::DUAL &&
+          !g_state.tc_base_err && g_state.temp_base > FAN_OFF_TEMP) {
+        hot = true;
+      }
+      if (hot != g_state.fan_on) {
+        g_state.fan_on = hot;
+        RELAY_WRITE(RELAY_FAN, RELAY_FAN_INV, hot);
       }
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
@@ -285,21 +306,55 @@ static void Task_PID(void* param) {
 
     if (g_state.base_enabled) {
       pid_base->compute();
-      uint32_t on_time = (uint32_t)(g_state.pid_out_base / 100.0 * 2000.0);
-      on_time = constrain(on_time, 50u, 1950u);
-      if (millis() - win_base >= 2000) win_base = millis();
-      base_on = (millis() - win_base < on_time);
-      LOG_D(LOG_PID, "[PID] base out=%.1f on=%lu base_on=%d\n",
-            g_state.pid_out_base, (unsigned long)on_time, base_on);
+      // Duty PID (0–100) scalato per parzializzazione BASE
+      double duty_base = g_state.pid_out_base * (g_state.pct_base / 100.0);
+      if (duty_base < 0.0)   duty_base = 0.0;
+      if (duty_base > 100.0) duty_base = 100.0;
+
+      uint32_t window_ms = RELAY_WINDOW_MS;
+      uint32_t on_time   = 0;
+
+      if (duty_base > 0.0) {
+        on_time = (uint32_t)(duty_base / 100.0 * (double)window_ms);
+        uint32_t min_on = (uint32_t)((RELAY_MIN_DUTY_PCT / 100.0) * (double)window_ms);
+        if (min_on == 0 && RELAY_MIN_DUTY_PCT > 0) min_on = 1;
+        if (on_time > 0 && on_time < min_on) on_time = min_on;
+        if (on_time > window_ms) on_time = window_ms;
+      }
+
+      if (millis() - win_base >= window_ms) win_base = millis();
+      base_on = (on_time > 0 && (millis() - win_base) < on_time);
+
+      LOG_D(LOG_PID, "[PID] base out=%.1f duty=%.1f on=%lu/%lums base_on=%d\n",
+            g_state.pid_out_base, duty_base,
+            (unsigned long)on_time, (unsigned long)window_ms, base_on);
     }
 
     if (g_state.cielo_enabled) {
       pid_cielo->compute();
-      uint32_t on_time = (uint32_t)(g_state.pid_out_cielo / 100.0 * 2000.0);
-      on_time = constrain(on_time, 50u, 1950u);
-      if (millis() - win_cielo >= 2000) win_cielo = millis();
-      cielo_on = (millis() - win_cielo < on_time);
+      // Duty PID (0–100) scalato per parzializzazione CIELO
+      double duty_cielo = g_state.pid_out_cielo * (g_state.pct_cielo / 100.0);
+      if (duty_cielo < 0.0)   duty_cielo = 0.0;
+      if (duty_cielo > 100.0) duty_cielo = 100.0;
+
+      uint32_t window_ms = RELAY_WINDOW_MS;
+      uint32_t on_time   = 0;
+
+      if (duty_cielo > 0.0) {
+        on_time = (uint32_t)(duty_cielo / 100.0 * (double)window_ms);
+        uint32_t min_on = (uint32_t)((RELAY_MIN_DUTY_PCT / 100.0) * (double)window_ms);
+        if (min_on == 0 && RELAY_MIN_DUTY_PCT > 0) min_on = 1;
+        if (on_time > 0 && on_time < min_on) on_time = min_on;
+        if (on_time > window_ms) on_time = window_ms;
+      }
+
+      if (millis() - win_cielo >= window_ms) win_cielo = millis();
+      cielo_on = (on_time > 0 && (millis() - win_cielo) < on_time);
     }
+
+    // Sonda non rilevata: disabilita accensione resistenze e spegni relay
+    if (g_state.tc_base_err)  base_on  = false;
+    if (g_state.tc_cielo_err) cielo_on = false;
 
     RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  base_on);
     RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, cielo_on);
@@ -307,7 +362,16 @@ static void Task_PID(void* param) {
     if (MUTEX_TAKE()) {
       g_state.relay_base  = base_on;
       g_state.relay_cielo = cielo_on;
-      bool fan = (g_state.temp_cielo > FAN_OFF_TEMP);
+
+      // Ventola: ON se almeno una resistenza è attiva oppure se
+      // almeno un sensore attivo è sopra la soglia FAN_OFF_TEMP.
+      bool res_on = g_state.relay_base || g_state.relay_cielo;
+      bool hot = (!g_state.tc_cielo_err && g_state.temp_cielo > FAN_OFF_TEMP);
+      if (g_state.sensor_mode == SensorMode::DUAL &&
+          !g_state.tc_base_err && g_state.temp_base > FAN_OFF_TEMP) {
+        hot = true;
+      }
+      bool fan = res_on || hot;
       if (fan != g_state.fan_on) {
         g_state.fan_on = fan;
         RELAY_WRITE(RELAY_FAN, RELAY_FAN_INV, fan);
@@ -389,6 +453,9 @@ static void Task_LVGL(void* param) {
           case Screen::PID_CIELO:
             ui_refresh_pid(&g_state);
             break;
+          case Screen::AUTOTUNE:
+            ui_refresh_autotune(&g_state);
+            break;
           case Screen::GRAPH:
             if (ui_ScreenGraph && lv_scr_act() == ui_ScreenGraph)
               ui_refresh_graph(&g_state);
@@ -401,6 +468,8 @@ static void Task_LVGL(void* param) {
           case Screen::WIFI_SCAN:
             // nessuna azione — la lista si aggiorna via g_wifi_scan_done
             // lo status si aggiorna via g_wifi_status_changed
+            break;
+          case Screen::MQTT:
             break;
           case Screen::OTA:
             ui_ota_update_progress();

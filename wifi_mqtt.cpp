@@ -49,6 +49,33 @@
 #define T_AT_STATUS   "forno/" MQTT_DEVICE_ID "/autotune/status"
 #define HA_DISC       "homeassistant"
 
+#define MQTT_NVS_NAMESPACE  "mqtt"
+#define MQTT_DEFAULT_PORT   "1883"
+
+// ================================================================
+//  CONFIG MQTT DA NVS (stessi valori salvati dalla schermata MQTT)
+// ================================================================
+static char s_mqtt_host[65] = "192.168.1.100";
+static char s_mqtt_port[8]  = "1883";
+static char s_mqtt_user[33] = "";
+static char s_mqtt_pass[33] = "";
+
+static void mqtt_config_load() {
+  Preferences prefs;
+  if (!prefs.begin(MQTT_NVS_NAMESPACE, true)) {
+    strncpy(s_mqtt_host, "192.168.1.100", sizeof(s_mqtt_host) - 1); s_mqtt_host[sizeof(s_mqtt_host)-1] = '\0';
+    strncpy(s_mqtt_port, MQTT_DEFAULT_PORT, sizeof(s_mqtt_port) - 1); s_mqtt_port[sizeof(s_mqtt_port)-1] = '\0';
+    s_mqtt_user[0] = s_mqtt_pass[0] = '\0';
+    prefs.end();
+    return;
+  }
+  strncpy(s_mqtt_host, prefs.getString("host", "192.168.1.100").c_str(), sizeof(s_mqtt_host) - 1); s_mqtt_host[sizeof(s_mqtt_host)-1] = '\0';
+  strncpy(s_mqtt_port, prefs.getString("port", MQTT_DEFAULT_PORT).c_str(), sizeof(s_mqtt_port) - 1); s_mqtt_port[sizeof(s_mqtt_port)-1] = '\0';
+  strncpy(s_mqtt_user, prefs.getString("user", "").c_str(), sizeof(s_mqtt_user) - 1); s_mqtt_user[sizeof(s_mqtt_user)-1] = '\0';
+  strncpy(s_mqtt_pass, prefs.getString("pass", "").c_str(), sizeof(s_mqtt_pass) - 1); s_mqtt_pass[sizeof(s_mqtt_pass)-1] = '\0';
+  prefs.end();
+}
+
 // ================================================================
 //  STATO CONNESSIONE
 // ================================================================
@@ -342,16 +369,21 @@ static void mqtt_callback(char* topic_in, byte* pay, unsigned int len) {
 }
 
 // ================================================================
-//  MQTT connect + discovery
+//  MQTT connect + discovery (usa host/port/user/pass da NVS)
 // ================================================================
 static bool mqtt_connect() {
+  mqtt_config_load();
+  int port = atoi(s_mqtt_port);
+  if (port <= 0 || port > 65535) port = 1883;
+  mqtt.setServer(s_mqtt_host, (uint16_t)port);
+
   char client_id[32];
   snprintf(client_id, sizeof(client_id), "%s_%04X", MQTT_DEVICE_ID,
            (uint16_t)(ESP.getEfuseMac() & 0xFFFF));
 
   bool ok;
-  if (strlen(MQTT_USER) > 0)
-    ok = mqtt.connect(client_id, MQTT_USER, MQTT_PASS, T_AVAIL, 1, true, "offline");
+  if (strlen(s_mqtt_user) > 0)
+    ok = mqtt.connect(client_id, s_mqtt_user, s_mqtt_pass, T_AVAIL, 1, true, "offline");
   else
     ok = mqtt.connect(client_id, nullptr, nullptr, T_AVAIL, 1, true, "offline");
 
@@ -389,7 +421,10 @@ void Task_WiFi(void* param) {
   uint32_t last_wifi_try_ms = 0;
   uint32_t last_mqtt_try_ms = 0;
 
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt_config_load();
+  int port = atoi(s_mqtt_port);
+  if (port <= 0 || port > 65535) port = 1883;
+  mqtt.setServer(s_mqtt_host, (uint16_t)port);
   mqtt.setCallback(mqtt_callback);
   mqtt.setKeepAlive(MQTT_KEEPALIVE);
   mqtt.setBufferSize(640);

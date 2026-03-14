@@ -1,18 +1,15 @@
 /**
  * ui_events.cpp — Forno Pizza Controller v21-S3
  * ================================================================
- * File invariato rispetto alla versione precedente.
- * Il bounce dei bottoni ± è ora gestito direttamente in ui.cpp
- * tramite make_pm() che aggiunge cb_anim_bounce su ogni bottone.
+ * Animazioni pressione pulsanti disabilitate (transition_duration 0).
  * ================================================================
  */
 
 #include "ui.h"
 #include "hardware.h"
-#include "ui_animations.h"   // disponibile per usi futuri
 #include <Arduino.h>
+#include "autotune.h"
 
-bool g_arc_snap = false;
 static void mark_dirty() { g_state.nvs_dirty = true; }
 
 static void refresh_active() {
@@ -31,26 +28,18 @@ static void refresh_active() {
 // ================================================================
 void cb_base_minus(lv_event_t*) {
   g_state.set_base = fmax(50.0, g_state.set_base - 5.0);
-  anim_setpoint_drag_feedback(ui_TempSetBase);
-  g_arc_snap = true;          // ← arco snap istantaneo
   refresh_active();
 }
 void cb_base_plus(lv_event_t*) {
   g_state.set_base = fmin(500.0, g_state.set_base + 5.0);
-  anim_setpoint_drag_feedback(ui_TempSetBase);
-  g_arc_snap = true;          // ← arco snap istantaneo
   refresh_active();
 }
 void cb_cielo_minus(lv_event_t*) {
   g_state.set_cielo = fmax(50.0, g_state.set_cielo - 5.0);
-  anim_setpoint_drag_feedback(ui_TempSetCielo);
-  g_arc_snap = true;          // ← arco snap istantaneo
   refresh_active();
 }
 void cb_cielo_plus(lv_event_t*) {
   g_state.set_cielo = fmin(500.0, g_state.set_cielo + 5.0);
-  anim_setpoint_drag_feedback(ui_TempSetCielo);
-  g_arc_snap = true;          // ← arco snap istantaneo
   refresh_active();
 }
 
@@ -64,7 +53,9 @@ void cb_toggle_base(lv_event_t*) {
   } else {
     g_state.base_enabled = !g_state.base_enabled;
   }
-  ui_refresh(&g_state); ui_refresh_temp(&g_state);
+  ui_refresh(&g_state);
+  ui_refresh_temp(&g_state);
+  ui_timer_auto_start();
 }
 void cb_toggle_cielo(lv_event_t*) {
   if (g_state.sensor_mode == SensorMode::SINGLE) {
@@ -73,7 +64,9 @@ void cb_toggle_cielo(lv_event_t*) {
   } else {
     g_state.cielo_enabled = !g_state.cielo_enabled;
   }
-  ui_refresh(&g_state); ui_refresh_temp(&g_state);
+  ui_refresh(&g_state);
+  ui_refresh_temp(&g_state);
+  ui_timer_auto_start();
 }
 void cb_toggle_luce(lv_event_t*) {
   g_state.luce_on = !g_state.luce_on;
@@ -132,6 +125,7 @@ void cb_goto_timer(lv_event_t*)           { ui_show_screen(Screen::TIMER);     }
 void cb_goto_ricette(lv_event_t*)         { ui_show_screen(Screen::RICETTE);   }
 void cb_goto_wifi(lv_event_t*)            { ui_show_screen(Screen::WIFI_SCAN); }
 void cb_goto_ota(lv_event_t*)             { ui_show_screen(Screen::OTA);       }
+void cb_goto_autotune(lv_event_t*)        { ui_show_screen(Screen::AUTOTUNE);  }
 
 // ================================================================
 //  CALLBACKS — grafico preset
@@ -211,9 +205,67 @@ void cb_timer_reset(lv_event_t*)  {
   s_timer_running = false;
   s_timer_minutes = TIMER_DEFAULT_MIN;
   s_timer_seconds = 0;
-  anim_timer_countdown_stop(ui_LabelTimerValue);  // ← ANIMAZIONE 17: reset pulse
   timer_refresh_display();
   if (ui_LabelTimerStatus) lv_label_set_text(ui_LabelTimerStatus, LV_SYMBOL_CHARGE " Parte con resistenza ON");
+}
+
+// ================================================================
+//  TIMER DI SICUREZZA — API chiamate da altri task
+// ================================================================
+void ui_timer_auto_start(void) {
+  if (s_timer_running) return;
+  if (!(g_state.base_enabled || g_state.cielo_enabled)) return;
+  s_timer_running = true;
+  if (ui_LabelTimerStatus)
+    lv_label_set_text(ui_LabelTimerStatus, LV_SYMBOL_PLAY " IN CORSO");
+}
+
+void ui_timer_tick_1s(void) {
+  if (!s_timer_running) return;
+  if (s_timer_minutes == 0 && s_timer_seconds == 0) return;
+
+  if (s_timer_seconds == 0) {
+    if (s_timer_minutes == 0) return;
+    s_timer_minutes--;
+    s_timer_seconds = 59;
+  } else {
+    s_timer_seconds--;
+  }
+
+  timer_refresh_display();
+
+  if (s_timer_minutes == 0 && s_timer_seconds == 0) {
+    s_timer_running = false;
+    // Spegni resistenze — la ventola resta gestita dalla sua logica temperatura/relay
+    if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+      g_state.base_enabled  = false;
+      g_state.cielo_enabled = false;
+      MUTEX_GIVE();
+    }
+    if (ui_LabelTimerStatus)
+      lv_label_set_text(ui_LabelTimerStatus, LV_SYMBOL_STOP " Fine cottura — resistenze OFF");
+  }
+}
+
+// ================================================================
+//  CALLBACK — AVVIO AUTOTUNE PID
+// ================================================================
+void cb_autotune_start(lv_event_t*) {
+  if (g_state.safety_shutdown) return;
+  if (autotune_is_running())   return;
+
+  // Imposta split di autotune in base alla parzializzazione corrente
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    g_state.autotune_split = g_state.pct_base;
+    MUTEX_GIVE();
+  }
+
+  autotune_start();
+}
+
+void cb_autotune_stop(lv_event_t*) {
+  if (!autotune_is_running()) return;
+  autotune_stop();
 }
 
 // ================================================================
