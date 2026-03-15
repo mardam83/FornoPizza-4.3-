@@ -51,6 +51,7 @@ lv_obj_t* ui_MqttHostTA   = NULL;
 lv_obj_t* ui_MqttPortTA   = NULL;
 lv_obj_t* ui_MqttUserTA   = NULL;
 lv_obj_t* ui_MqttPassTA   = NULL;
+lv_obj_t* ui_MqttKbd      = NULL;   // tastierino inserimento
 lv_obj_t* ui_BtnMqttToWifi = NULL;
 lv_obj_t* ui_BtnMqttToMain = NULL;
 lv_obj_t* ui_MqttBtnLbl   = NULL;   // label del pulsante MQTT in header WiFi
@@ -100,6 +101,7 @@ static void cb_ota_back_btn(lv_event_t* e);
 static void cb_goto_mqtt(lv_event_t* e);
 static void cb_mqtt_to_wifi(lv_event_t* e);
 static void cb_mqtt_to_main(lv_event_t* e);
+static void cb_mqtt_ta_focused(lv_event_t* e);
 
 // ================================================================
 //  HELPERS
@@ -195,7 +197,9 @@ void ui_build_wifi(void) {
     lv_obj_set_style_border_width(ui_WifiList, 0, 0);
     lv_obj_set_style_pad_all(ui_WifiList, 0, 0);
     lv_obj_set_style_radius(ui_WifiList, 0, 0);
-    lv_obj_clear_flag(ui_WifiList, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(ui_WifiList, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(ui_WifiList, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scroll_dir(ui_WifiList, LV_DIR_VER);
 
     s_wifi_status_lbl_list = lv_label_create(ui_WifiList);
     lv_label_set_text(s_wifi_status_lbl_list, "Premi AGGIORNA per cercare reti");
@@ -429,7 +433,7 @@ void ui_build_ota(void) {
 
 // ================================================================
 //  BUILD — MQTT (broker: IP, porta, user, password)
-//  Layout come PID: header + campi + barra nav [WiFi] [Main]
+//  Layout: header + griglia 2 righe x 2 colonne (campi dimezzati) + spazio tastierino + barra nav
 // ================================================================
 static void mqtt_nvs_load(char* host, size_t host_sz, char* port, size_t port_sz,
                           char* user, size_t user_sz, char* pass, size_t pass_sz) {
@@ -458,8 +462,24 @@ static void mqtt_nvs_save(const char* host, const char* port, const char* user, 
     prefs.end();
 }
 
+static void cb_mqtt_ta_focused(lv_event_t* e) {
+    lv_obj_t* ta = lv_event_get_target(e);
+    if (ui_MqttKbd && ta) {
+        lv_keyboard_set_textarea(ui_MqttKbd, ta);
+        lv_obj_clear_flag(ui_MqttKbd, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 void ui_build_mqtt(void) {
     lv_color_t COL_MQTT = lv_color_make(0x00, 0x99, 0x55);
+    const int CW = 230;  // larghezza colonna (2 colonne: 4 + 230 + 8 + 230 + 8 = 480)
+    const int MARGIN = 4;
+    const int GAP = 8;
+    const int ROW1_Y = 36;
+    const int ROW2_Y = 92;
+    const int LABEL_H = 14;
+    const int TA_H = 28;
+
     ui_ScreenMqtt = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(ui_ScreenMqtt, COL_DARK, 0);
     lv_obj_set_style_bg_opa(ui_ScreenMqtt, LV_OPA_COVER, 0);
@@ -479,16 +499,15 @@ void ui_build_mqtt(void) {
     lv_obj_set_style_text_color(hdr_lbl, lv_color_white(), 0);
     lv_obj_align(hdr_lbl, LV_ALIGN_CENTER, 0, 0);
 
-    int y = 36;
-    auto add_row = [&](const char* label_txt, lv_obj_t** ta_out, int max_len, bool password) {
+    auto add_cell = [&](int x, int y, const char* label_txt, lv_obj_t** ta_out, int max_len, bool password) {
         lv_obj_t* lbl = lv_label_create(ui_ScreenMqtt);
         lv_label_set_text(lbl, label_txt);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(lbl, COL_GRAY, 0);
-        lv_obj_set_pos(lbl, 6, y);
+        lv_obj_set_pos(lbl, x, y);
         lv_obj_t* ta = lv_textarea_create(ui_ScreenMqtt);
-        lv_obj_set_pos(ta, 4, y + 16);
-        lv_obj_set_size(ta, 472, 28);
+        lv_obj_set_pos(ta, x, y + LABEL_H + 2);
+        lv_obj_set_size(ta, CW, TA_H);
         lv_textarea_set_max_length(ta, max_len);
         lv_textarea_set_one_line(ta, true);
         lv_textarea_set_password_mode(ta, password);
@@ -496,26 +515,42 @@ void ui_build_mqtt(void) {
         lv_obj_set_style_text_color(ta, COL_WHITE, 0);
         lv_obj_set_style_border_color(ta, COL_MQTT, 0);
         lv_obj_set_style_border_width(ta, 2, 0);
+        lv_obj_add_event_cb(ta, cb_mqtt_ta_focused, LV_EVENT_FOCUSED, NULL);
         *ta_out = ta;
-        y += 50;
     };
-    add_row("IP / Host broker:", &ui_MqttHostTA, 64, false);
-    add_row("Porta (default 1883):", &ui_MqttPortTA, 6, false);
-    if (ui_MqttPortTA) lv_textarea_set_placeholder_text(ui_MqttPortTA, "1883");
-    add_row("Username:", &ui_MqttUserTA, 32, false);
-    add_row("Password:", &ui_MqttPassTA, 32, true);
 
+    int x1 = MARGIN;
+    int x2 = MARGIN + CW + GAP;
+    add_cell(x1, ROW1_Y, "IP / Host:", &ui_MqttHostTA, 64, false);
+    add_cell(x2, ROW1_Y, "Porta:", &ui_MqttPortTA, 6, false);
+    if (ui_MqttPortTA) lv_textarea_set_placeholder_text(ui_MqttPortTA, "1883");
+    add_cell(x1, ROW2_Y, "Username:", &ui_MqttUserTA, 32, false);
+    add_cell(x2, ROW2_Y, "Password:", &ui_MqttPassTA, 32, true);
+
+    // Tastierino in basso — spazio riservato (~160px), nascosto di default
+    ui_MqttKbd = lv_keyboard_create(ui_ScreenMqtt);
+    lv_obj_set_width(ui_MqttKbd, 480);
+    lv_obj_align(ui_MqttKbd, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_keyboard_set_mode(ui_MqttKbd, LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_keyboard_set_textarea(ui_MqttKbd, ui_MqttHostTA);
+    lv_obj_set_style_bg_color(ui_MqttKbd, lv_color_make(0x1A,0x1A,0x2A), 0);
+    lv_obj_set_style_bg_opa(ui_MqttKbd, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(ui_MqttKbd, COL_WHITE, 0);
+    lv_obj_add_flag(ui_MqttKbd, LV_OBJ_FLAG_HIDDEN);
+
+    // Barra nav sopra lo spazio riservato al tastierino (~160px in basso)
+    int nav_y = 138;
     lv_obj_t* nav = lv_obj_create(ui_ScreenMqtt);
-    lv_obj_set_pos(nav, 0, 238);
+    lv_obj_set_pos(nav, 0, nav_y);
     lv_obj_set_size(nav, 480, 34);
     lv_obj_set_style_bg_color(nav, COL_DARK, 0);
     lv_obj_set_style_border_width(nav, 0, 0);
     lv_obj_set_style_radius(nav, 0, 0);
     lv_obj_clear_flag(nav, LV_OBJ_FLAG_SCROLLABLE);
 
-    ui_BtnMqttToWifi = make_action_btn(ui_ScreenMqtt, 2, 240, 236, 30,
+    ui_BtnMqttToWifi = make_action_btn(ui_ScreenMqtt, 2, nav_y + 2, 236, 30,
         LV_SYMBOL_LEFT " WiFi", COL_WIFI, cb_mqtt_to_wifi);
-    ui_BtnMqttToMain = make_action_btn(ui_ScreenMqtt, 242, 240, 236, 30,
+    ui_BtnMqttToMain = make_action_btn(ui_ScreenMqtt, 242, nav_y + 2, 236, 30,
         "Main " LV_SYMBOL_RIGHT, COL_GRAY, cb_mqtt_to_main);
 }
 
@@ -552,6 +587,7 @@ void ui_show_mqtt(void) {
     if (ui_MqttPortTA) lv_textarea_set_text(ui_MqttPortTA, port);
     if (ui_MqttUserTA) lv_textarea_set_text(ui_MqttUserTA, user);
     if (ui_MqttPassTA) lv_textarea_set_text(ui_MqttPassTA, pass);
+    if (ui_MqttKbd) lv_obj_add_flag(ui_MqttKbd, LV_OBJ_FLAG_HIDDEN);
     lv_scr_load(ui_ScreenMqtt);
 }
 
@@ -596,9 +632,9 @@ void ui_wifi_update_list(void) {
 void ui_wifi_update_status(void) {
     if (!ui_WifiStatusLbl) return;
     if (g_wifi_connected) {
-        char buf[80];
-        snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " Connesso: %s  |  MQTT: %s",
-                 WiFi.SSID().c_str(), g_mqtt_connected ? "OK" : "---");
+        char buf[96];
+        snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " Connesso: %s  |  IP: %s  |  MQTT: %s",
+                 WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(), g_mqtt_connected ? "OK" : "---");
         lv_label_set_text(ui_WifiStatusLbl, buf);
         lv_obj_set_style_text_color(ui_WifiStatusLbl, COL_OK, 0);
     } else {

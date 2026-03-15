@@ -70,6 +70,7 @@ extern lv_obj_t* ui_MqttHostTA;        // IP/host broker
 extern lv_obj_t* ui_MqttPortTA;        // porta (default 1883)
 extern lv_obj_t* ui_MqttUserTA;        // username
 extern lv_obj_t* ui_MqttPassTA;        // password
+extern lv_obj_t* ui_MqttKbd;           // tastierino inserimento
 extern lv_obj_t* ui_BtnMqttToWifi;     // navigazione → WiFi
 extern lv_obj_t* ui_BtnMqttToMain;     // navigazione → Main
 extern lv_obj_t* ui_MqttBtnLbl;        // label pulsante MQTT in header WiFi (Connesso/Non connesso)
