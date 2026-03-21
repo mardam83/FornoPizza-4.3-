@@ -493,6 +493,12 @@ void ui_build_mqtt(void) {
     lv_obj_set_style_radius(hdr, 0, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
     lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+
+    ui_BtnMqttToWifi = make_action_btn(hdr, 2, 2, 72, 28,
+        LV_SYMBOL_LEFT " WiFi", COL_WIFI, cb_mqtt_to_wifi);
+    ui_BtnMqttToMain = make_action_btn(hdr, 406, 2, 72, 28,
+        "Main " LV_SYMBOL_RIGHT, COL_GRAY, cb_mqtt_to_main);
+
     lv_obj_t* hdr_lbl = lv_label_create(hdr);
     lv_label_set_text(hdr_lbl, "Broker MQTT");
     lv_obj_set_style_text_font(hdr_lbl, &lv_font_montserrat_18, 0);
@@ -527,7 +533,7 @@ void ui_build_mqtt(void) {
     add_cell(x1, ROW2_Y, "Username:", &ui_MqttUserTA, 32, false);
     add_cell(x2, ROW2_Y, "Password:", &ui_MqttPassTA, 32, true);
 
-    // Tastierino in basso — spazio riservato (~160px), nascosto di default
+    // Tastierino in basso — più spazio recuperato (nessuna barra nav sotto)
     ui_MqttKbd = lv_keyboard_create(ui_ScreenMqtt);
     lv_obj_set_width(ui_MqttKbd, 480);
     lv_obj_align(ui_MqttKbd, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -537,21 +543,6 @@ void ui_build_mqtt(void) {
     lv_obj_set_style_bg_opa(ui_MqttKbd, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(ui_MqttKbd, COL_WHITE, 0);
     lv_obj_add_flag(ui_MqttKbd, LV_OBJ_FLAG_HIDDEN);
-
-    // Barra nav sopra lo spazio riservato al tastierino (~160px in basso)
-    int nav_y = 138;
-    lv_obj_t* nav = lv_obj_create(ui_ScreenMqtt);
-    lv_obj_set_pos(nav, 0, nav_y);
-    lv_obj_set_size(nav, 480, 34);
-    lv_obj_set_style_bg_color(nav, COL_DARK, 0);
-    lv_obj_set_style_border_width(nav, 0, 0);
-    lv_obj_set_style_radius(nav, 0, 0);
-    lv_obj_clear_flag(nav, LV_OBJ_FLAG_SCROLLABLE);
-
-    ui_BtnMqttToWifi = make_action_btn(ui_ScreenMqtt, 2, nav_y + 2, 236, 30,
-        LV_SYMBOL_LEFT " WiFi", COL_WIFI, cb_mqtt_to_wifi);
-    ui_BtnMqttToMain = make_action_btn(ui_ScreenMqtt, 242, nav_y + 2, 236, 30,
-        "Main " LV_SYMBOL_RIGHT, COL_GRAY, cb_mqtt_to_main);
 }
 
 // ================================================================
