@@ -37,6 +37,7 @@ lv_obj_t* ui_LedFan         = NULL;  lv_obj_t* ui_LabelStatus    = NULL;
 lv_obj_t* ui_PanelSafety    = NULL;  lv_obj_t* ui_LabelSafety    = NULL;
 
 lv_obj_t* ui_ScreenTemp      = NULL;
+lv_obj_t* ui_PanelBase       = NULL;  lv_obj_t* ui_PanelCielo      = NULL;
 lv_obj_t* ui_ArcBase         = NULL;  lv_obj_t* ui_ArcCielo        = NULL;
 lv_obj_t* ui_TempSetBase     = NULL;  lv_obj_t* ui_TempSetCielo    = NULL;
 lv_obj_t* ui_TempBarBase     = NULL;  lv_obj_t* ui_TempBarCielo    = NULL;
@@ -112,6 +113,192 @@ lv_obj_t* ui_AutoLblBase      = NULL;
 lv_obj_t* ui_AutoLblCielo     = NULL;
 
 GraphBuffer g_graph = {{0},{0},0,0};
+
+// Pannelli MAIN (per layout SINGLE/DUAL)
+static lv_obj_t* ui_PanelMainBase  = nullptr;
+static lv_obj_t* ui_PanelMainCielo = nullptr;
+// Figli pannello CIELO schermata CTRL (± e step °C)
+static lv_obj_t* s_TempPmCieloP      = nullptr;
+static lv_obj_t* s_TempPmCieloM      = nullptr;
+static lv_obj_t* s_TempLblStepCielo  = nullptr;
+static lv_obj_t* s_TempLblTitleCielo = nullptr;
+
+// ================================================================
+//  Layout MAIN/CTRL in base a SensorMode
+// ================================================================
+static void ui_apply_main_sensor_layout(bool single) {
+    if (!ui_PanelMainBase || !ui_PanelMainCielo) return;
+
+    if (single) {
+        lv_obj_add_flag(ui_PanelMainBase, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(ui_PanelMainCielo, 2, 36);
+        lv_obj_set_size(ui_PanelMainCielo, 476, 178);
+        lv_obj_set_style_bg_color(ui_PanelMainCielo, UI_COL_SURFACE, 0);
+        lv_obj_set_style_border_color(ui_PanelMainCielo, UI_COL_CIELO, 0);
+        {
+            lv_obj_t* t = lv_obj_get_child(ui_PanelMainCielo, 0);
+            if (t) lv_obj_set_style_text_color(t, UI_COL_CIELO, 0);
+        }
+
+        lv_obj_set_width(ui_LabelTempCielo, 400);
+        lv_obj_set_pos(ui_LabelTempCielo, 38, 14);
+        lv_obj_set_style_text_font(ui_LabelTempCielo, &lv_font_montserrat_48, 0);
+        lv_obj_set_style_text_align(ui_LabelTempCielo, LV_TEXT_ALIGN_CENTER, 0);
+
+        lv_obj_set_width(ui_LabelErrCielo, 380);
+        lv_obj_set_pos(ui_LabelErrCielo, 48, 78);
+
+        lv_obj_set_pos(ui_LedRelayCielo, 400, 4);
+        lv_obj_set_pos(ui_BarPidCielo, 8, 108);
+        lv_obj_set_size(ui_BarPidCielo, 448, 8);
+        lv_obj_set_pos(ui_LabelPidCielo, 8, 120);
+
+        lv_obj_add_flag(ui_BtnEnBase, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui_BtnEnCielo, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(ui_BtnEnCielo, 2, 217);
+        lv_obj_set_size(ui_BtnEnCielo, 300, 31);
+        lv_obj_set_pos(ui_BtnLuce, 306, 217);
+        lv_obj_set_size(ui_BtnLuce, 172, 31);
+
+        lv_obj_set_pos(ui_BarPreheatCielo, 2, 217);
+        lv_obj_set_size(ui_BarPreheatCielo, 476, 4);
+        lv_obj_add_flag(ui_BarPreheatBase, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(ui_PanelMainBase, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_color(ui_PanelMainBase, UI_COL_SURFACE, 0);
+        lv_obj_set_style_border_color(ui_PanelMainBase, UI_COL_ACCENT, 0);
+        lv_obj_set_pos(ui_PanelMainCielo, 244, 36);
+        lv_obj_set_size(ui_PanelMainCielo, 234, 178);
+        lv_obj_set_style_bg_color(ui_PanelMainCielo, UI_COL_SURFACE, 0);
+        lv_obj_set_style_border_color(ui_PanelMainCielo, UI_COL_CIELO, 0);
+        {
+            lv_obj_t* t = lv_obj_get_child(ui_PanelMainCielo, 0);
+            if (t) lv_obj_set_style_text_color(t, UI_COL_CIELO, 0);
+        }
+
+        lv_obj_set_width(ui_LabelTempCielo, 222);
+        lv_obj_set_pos(ui_LabelTempCielo, 0, 22);
+        lv_obj_set_style_text_font(ui_LabelTempCielo, &lv_font_montserrat_48, 0);
+        lv_obj_set_style_text_align(ui_LabelTempCielo, LV_TEXT_ALIGN_CENTER, 0);
+
+        lv_obj_set_width(ui_LabelErrCielo, 222);
+        lv_obj_set_pos(ui_LabelErrCielo, 0, 80);
+
+        lv_obj_set_pos(ui_LedRelayCielo, 192, 0);
+        lv_obj_set_pos(ui_BarPidCielo, 0, 96);
+        lv_obj_set_size(ui_BarPidCielo, 222, 8);
+        lv_obj_set_pos(ui_LabelPidCielo, 0, 106);
+
+        lv_obj_clear_flag(ui_BtnEnBase, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(ui_BtnEnBase, 2, 217);
+        lv_obj_set_size(ui_BtnEnBase, 150, 31);
+        lv_obj_set_pos(ui_BtnEnCielo, 165, 217);
+        lv_obj_set_size(ui_BtnEnCielo, 150, 31);
+        lv_obj_set_pos(ui_BtnLuce, 328, 217);
+        lv_obj_set_size(ui_BtnLuce, 150, 31);
+
+        lv_obj_set_pos(ui_BarPreheatBase, 2, 217);
+        lv_obj_set_size(ui_BarPreheatBase, 234, 4);
+        lv_obj_set_pos(ui_BarPreheatCielo, 244, 217);
+        lv_obj_set_size(ui_BarPreheatCielo, 234, 4);
+        lv_obj_clear_flag(ui_BarPreheatBase, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void ui_apply_temp_sensor_layout(bool single) {
+    if (!ui_PanelBase || !ui_PanelCielo) return;
+
+    if (single) {
+        lv_obj_add_flag(ui_PanelBase, LV_OBJ_FLAG_HIDDEN);
+
+        lv_obj_set_pos(ui_PanelCielo, 2, 33);
+        lv_obj_set_size(ui_PanelCielo, 476, 150);
+
+        if (s_TempLblTitleCielo) {
+            lv_obj_set_pos(s_TempLblTitleCielo, 10, 4);
+            lv_obj_set_style_text_font(s_TempLblTitleCielo, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(s_TempLblTitleCielo, UI_COL_CIELO, 0);
+        }
+        lv_obj_set_style_bg_color(ui_PanelCielo, UI_COL_SURFACE, 0);
+        lv_obj_set_style_border_color(ui_PanelCielo, UI_COL_CIELO, 0);
+        /* Arc sotto il titolo: 148px di altezza usciva dal pannello (150) e copriva PID */
+        lv_obj_set_pos(ui_ArcCielo, 10, 22);
+        lv_obj_set_size(ui_ArcCielo, 108, 108);
+        lv_obj_set_pos(ui_TempSetCielo, 14, 48);
+        lv_obj_set_size(ui_TempSetCielo, 100, 28);
+        lv_obj_set_style_text_font(ui_TempSetCielo, &lv_font_montserrat_22, 0);
+
+        if (s_TempPmCieloP) {
+            lv_obj_set_pos(s_TempPmCieloP, 288, 18);
+            lv_obj_set_size(s_TempPmCieloP, 92, 36);
+        }
+        if (s_TempPmCieloM) {
+            lv_obj_set_pos(s_TempPmCieloM, 288, 58);
+            lv_obj_set_size(s_TempPmCieloM, 92, 36);
+        }
+        if (s_TempLblStepCielo) lv_obj_set_pos(s_TempLblStepCielo, 304, 100);
+
+        lv_obj_set_pos(ui_TempErrCielo, 128, 4);
+        lv_obj_set_width(ui_TempErrCielo, 340);
+        lv_obj_set_pos(ui_TempBarCielo, 10, 132);
+        lv_obj_set_size(ui_TempBarCielo, 452, 8);
+
+        lv_obj_add_flag(ui_TempBtnEnBase, LV_OBJ_FLAG_HIDDEN);
+        /* 1+220+224+78=302 → lascia spazio a TORNA MAIN (x=317) */
+        lv_obj_set_pos(ui_TempBtnEnCielo, 1, 1);
+        lv_obj_set_size(ui_TempBtnEnCielo, 220, 28);
+        lv_obj_set_pos(ui_TempBtnLuce, 224, 1);
+        lv_obj_set_size(ui_TempBtnLuce, 78, 28);
+    } else {
+        lv_obj_clear_flag(ui_PanelBase, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_opa(ui_PanelBase, LV_OPA_COVER, 0);
+        lv_obj_add_flag(ui_PanelBase, LV_OBJ_FLAG_CLICKABLE);
+
+        lv_obj_set_pos(ui_PanelBase, 2, 33);
+        lv_obj_set_size(ui_PanelBase, 234, 150);
+        lv_obj_set_style_bg_color(ui_PanelBase, UI_COL_SURFACE, 0);
+        lv_obj_set_style_border_color(ui_PanelBase, UI_COL_ACCENT, 0);
+
+        lv_obj_set_pos(ui_PanelCielo, 238, 33);
+        lv_obj_set_size(ui_PanelCielo, 240, 150);
+
+        if (s_TempLblTitleCielo) {
+            lv_obj_set_pos(s_TempLblTitleCielo, 0, 0);
+            lv_obj_set_style_text_font(s_TempLblTitleCielo, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(s_TempLblTitleCielo, UI_COL_CIELO, 0);
+        }
+        lv_obj_set_style_bg_color(ui_PanelCielo, UI_COL_SURFACE, 0);
+        lv_obj_set_style_border_color(ui_PanelCielo, UI_COL_CIELO, 0);
+        lv_obj_set_pos(ui_ArcCielo, 0, 14);
+        lv_obj_set_size(ui_ArcCielo, 112, 112);
+        lv_obj_set_pos(ui_TempSetCielo, 0, 56);
+        lv_obj_set_size(ui_TempSetCielo, 112, 28);
+        lv_obj_set_style_text_font(ui_TempSetCielo, &lv_font_montserrat_22, 0);
+
+        if (s_TempPmCieloP) {
+            lv_obj_set_pos(s_TempPmCieloP, 116, 14);
+            lv_obj_set_size(s_TempPmCieloP, 100, 44);
+        }
+        if (s_TempPmCieloM) {
+            lv_obj_set_pos(s_TempPmCieloM, 116, 62);
+            lv_obj_set_size(s_TempPmCieloM, 100, 44);
+        }
+        if (s_TempLblStepCielo) lv_obj_set_pos(s_TempLblStepCielo, 148, 112);
+
+        lv_obj_set_pos(ui_TempErrCielo, 0, 126);
+        lv_obj_set_width(ui_TempErrCielo, 228);
+        lv_obj_set_pos(ui_TempBarCielo, 0, 132);
+        lv_obj_set_size(ui_TempBarCielo, 228, 8);
+
+        lv_obj_clear_flag(ui_TempBtnEnBase, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(ui_TempBtnEnBase, 1, 1);
+        lv_obj_set_size(ui_TempBtnEnBase, 115, 30);
+        lv_obj_set_pos(ui_TempBtnEnCielo, 118, 1);
+        lv_obj_set_size(ui_TempBtnEnCielo, 115, 30);
+        lv_obj_set_pos(ui_TempBtnLuce, 235, 1);
+        lv_obj_set_size(ui_TempBtnLuce, 78, 30);
+    }
+}
 
 // ================================================================
 //  CALLBACKS — dichiarate in ui_events.cpp
@@ -225,7 +412,7 @@ static lv_obj_t* make_pm(lv_obj_t* p, int x, int y, int w, int h,
                           const char* t, lv_color_t col, lv_event_cb_t cb) {
     lv_obj_t* b = lv_btn_create(p);
     lv_obj_set_pos(b, x, y); lv_obj_set_size(b, w, h);
-    lv_obj_set_style_bg_color(b, lv_color_make(0x1C,0x1C,0x2C), 0);
+    lv_obj_set_style_bg_color(b, UI_COL_SURFACE_ALT, 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(b, col, 0);
     lv_obj_set_style_border_width(b, 2, 0);
@@ -245,8 +432,8 @@ static lv_obj_t* make_ctrl(lv_obj_t* p, int x, int y, int w, int h,
                              const char* txt, lv_event_cb_t cb, lv_obj_t** lbl_out) {
     lv_obj_t* b = lv_btn_create(p);
     lv_obj_set_pos(b, x, y); lv_obj_set_size(b, w, h);
-    lv_obj_set_style_bg_color(b, lv_color_make(0x20,0x20,0x2E), 0);
-    lv_obj_set_style_border_color(b, lv_color_make(0x48,0x48,0x60), 0);
+    lv_obj_set_style_bg_color(b, UI_COL_SURFACE_ALT, 0);
+    lv_obj_set_style_border_color(b, UI_COL_BORDER, 0);
     lv_obj_set_style_border_width(b, 2, 0);
     lv_obj_set_style_radius(b, 8, 0);
     lv_obj_set_style_shadow_width(b, 0, 0);
@@ -291,21 +478,22 @@ static void build_main() {
         lv_obj_center(l);
         return b;
     };
-    // Tre pulsanti distribuiti orizzontalmente: CONTROL, GRAF, WiFi
-    make_nav(ui_ScreenMain,   5, lv_color_make(0x14,0x14,0x22), UI_COL_ACCENT,
-             LV_SYMBOL_SETTINGS " CONTROL",  UI_COL_ACCENT,  cb_goto_temp);
-    make_nav(ui_ScreenMain, 165, lv_color_make(0x05,0x09,0x05), lv_color_make(0x80,0xFF,0x40),
-             LV_SYMBOL_IMAGE " GRAFIC",       lv_color_make(0x80,0xFF,0x40), cb_goto_graph);
-    make_nav(ui_ScreenMain, 325, lv_color_make(0x00,0x10,0x20), UI_COL_CYAN,
-             LV_SYMBOL_WIFI " WiFi",        UI_COL_CYAN,    cb_goto_wifi);
+    // Barra nav: stile unico (pochi colori)
+    make_nav(ui_ScreenMain,   5, UI_COL_SURFACE_ALT, UI_COL_BORDER,
+             LV_SYMBOL_SETTINGS " CONTROL",  UI_COL_GRAY,  cb_goto_temp);
+    make_nav(ui_ScreenMain, 165, UI_COL_SURFACE_ALT, UI_COL_BORDER,
+             LV_SYMBOL_IMAGE " GRAFIC",       UI_COL_GRAY, cb_goto_graph);
+    make_nav(ui_ScreenMain, 325, UI_COL_SURFACE_ALT, UI_COL_BORDER,
+             LV_SYMBOL_WIFI " WiFi",        UI_COL_GRAY,    cb_goto_wifi);
 
     // Sep y=33
     //make_sep(ui_ScreenMain, 33, UI_COL_DARKGRAY);
 
     // Pannello BASE x=2 y=36 w=234 h=178
     lv_obj_t* pb = lv_obj_create(ui_ScreenMain);
+    ui_PanelMainBase = pb;
     lv_obj_set_pos(pb, 2, 36); lv_obj_set_size(pb, 234, 178);
-    lv_obj_set_style_bg_color(pb, lv_color_make(0x14,0x0A,0x00), 0);
+    lv_obj_set_style_bg_color(pb, UI_COL_SURFACE, 0);
     lv_obj_set_style_border_color(pb, UI_COL_ACCENT, 0);
     lv_obj_set_style_border_width(pb, 2, 0);
     lv_obj_set_style_radius(pb, 10, 0);
@@ -325,7 +513,7 @@ static void build_main() {
 
     ui_LabelErrBase = lv_label_create(pb); lv_label_set_text(ui_LabelErrBase, "");
     lv_obj_set_style_text_font(ui_LabelErrBase, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(ui_LabelErrBase, lv_color_make(0xFF,0x40,0x40), 0);
+    lv_obj_set_style_text_color(ui_LabelErrBase, UI_COL_ERR, 0);
     lv_obj_set_pos(ui_LabelErrBase, 0, 80);
     lv_obj_set_width(ui_LabelErrBase, 222);
     lv_obj_set_style_text_align(ui_LabelErrBase, LV_TEXT_ALIGN_CENTER, 0);
@@ -342,8 +530,9 @@ static void build_main() {
 
     // Pannello CIELO x=244 y=36 w=234 h=178
     lv_obj_t* pc = lv_obj_create(ui_ScreenMain);
+    ui_PanelMainCielo = pc;
     lv_obj_set_pos(pc, 244, 36); lv_obj_set_size(pc, 234, 178);
-    lv_obj_set_style_bg_color(pc, lv_color_make(0x14,0x00,0x00), 0);
+    lv_obj_set_style_bg_color(pc, UI_COL_SURFACE, 0);
     lv_obj_set_style_border_color(pc, UI_COL_CIELO, 0);
     lv_obj_set_style_border_width(pc, 2, 0);
     lv_obj_set_style_radius(pc, 10, 0);
@@ -363,7 +552,7 @@ static void build_main() {
 
     ui_LabelErrCielo = lv_label_create(pc); lv_label_set_text(ui_LabelErrCielo, "");
     lv_obj_set_style_text_font(ui_LabelErrCielo, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(ui_LabelErrCielo, lv_color_make(0xFF,0x40,0x40), 0);
+    lv_obj_set_style_text_color(ui_LabelErrCielo, UI_COL_ERR, 0);
     lv_obj_set_pos(ui_LabelErrCielo, 0, 80);
     lv_obj_set_width(ui_LabelErrCielo, 222);
     lv_obj_set_style_text_align(ui_LabelErrCielo, LV_TEXT_ALIGN_CENTER, 0);
@@ -384,8 +573,8 @@ static void build_main() {
     // ON/OFF bar y=217 h=31
     ui_BtnEnBase  = lv_btn_create(ui_ScreenMain);
     lv_obj_set_pos(ui_BtnEnBase,   2, 217); lv_obj_set_size(ui_BtnEnBase,  150, 31);
-    lv_obj_set_style_bg_color(ui_BtnEnBase,  lv_color_make(0x20,0x20,0x2E), 0);
-    lv_obj_set_style_border_color(ui_BtnEnBase, lv_color_make(0x48,0x48,0x60), 0);
+    lv_obj_set_style_bg_color(ui_BtnEnBase,  UI_COL_SURFACE_ALT, 0);
+    lv_obj_set_style_border_color(ui_BtnEnBase, UI_COL_BORDER, 0);
     lv_obj_set_style_border_width(ui_BtnEnBase,  2, 0);
     lv_obj_set_style_radius(ui_BtnEnBase, 8, 0);
     lv_obj_set_style_shadow_width(ui_BtnEnBase, 0, 0);
@@ -402,8 +591,8 @@ static void build_main() {
 
     ui_BtnEnCielo = lv_btn_create(ui_ScreenMain);
     lv_obj_set_pos(ui_BtnEnCielo, 165, 217); lv_obj_set_size(ui_BtnEnCielo, 150, 31);
-    lv_obj_set_style_bg_color(ui_BtnEnCielo, lv_color_make(0x20,0x20,0x2E), 0);
-    lv_obj_set_style_border_color(ui_BtnEnCielo, lv_color_make(0x48,0x48,0x60), 0);
+    lv_obj_set_style_bg_color(ui_BtnEnCielo, UI_COL_SURFACE_ALT, 0);
+    lv_obj_set_style_border_color(ui_BtnEnCielo, UI_COL_BORDER, 0);
     lv_obj_set_style_border_width(ui_BtnEnCielo, 2, 0);
     lv_obj_set_style_radius(ui_BtnEnCielo, 8, 0);
     lv_obj_set_style_shadow_width(ui_BtnEnCielo, 0, 0);
@@ -420,8 +609,8 @@ static void build_main() {
 
     ui_BtnLuce = lv_btn_create(ui_ScreenMain);
     lv_obj_set_pos(ui_BtnLuce, 328, 217); lv_obj_set_size(ui_BtnLuce, 150, 31);
-    lv_obj_set_style_bg_color(ui_BtnLuce, lv_color_make(0x20,0x20,0x2E), 0);
-    lv_obj_set_style_border_color(ui_BtnLuce, lv_color_make(0x48,0x48,0x60), 0);
+    lv_obj_set_style_bg_color(ui_BtnLuce, UI_COL_SURFACE_ALT, 0);
+    lv_obj_set_style_border_color(ui_BtnLuce, UI_COL_BORDER, 0);
     lv_obj_set_style_border_width(ui_BtnLuce, 2, 0);
     lv_obj_set_style_radius(ui_BtnLuce, 8, 0);
     lv_obj_set_style_shadow_width(ui_BtnLuce, 0, 0);
@@ -466,7 +655,7 @@ static void build_main() {
     // Safety banner
     ui_PanelSafety = lv_obj_create(ui_ScreenMain);
     lv_obj_set_pos(ui_PanelSafety, 0, 33); lv_obj_set_size(ui_PanelSafety, SCR_W, 36);
-    lv_obj_set_style_bg_color(ui_PanelSafety, lv_color_make(0xC0,0x00,0x00), 0);
+    lv_obj_set_style_bg_color(ui_PanelSafety, lv_color_make(0x70,0x28,0x28), 0);
     lv_obj_set_style_bg_opa(ui_PanelSafety, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(ui_PanelSafety, 0, 0);
     lv_obj_set_style_radius(ui_PanelSafety, 0, 0);
@@ -531,8 +720,9 @@ static void build_temp() {
 
     // Panel BASE
     lv_obj_t* pb = lv_obj_create(ui_ScreenTemp);
+    ui_PanelBase = pb;
     lv_obj_set_pos(pb, 2, 33); lv_obj_set_size(pb, 234, 150);
-    lv_obj_set_style_bg_color(pb, lv_color_make(0x14,0x14,0x22), 0);
+    lv_obj_set_style_bg_color(pb, UI_COL_SURFACE, 0);
     lv_obj_set_style_bg_opa(pb, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(pb, UI_COL_ACCENT, 0);
     lv_obj_set_style_border_width(pb, 2, 0);
@@ -564,15 +754,16 @@ static void build_temp() {
 
     ui_TempErrBase = lv_label_create(pb); lv_label_set_text(ui_TempErrBase, "");
     lv_obj_set_style_text_font(ui_TempErrBase, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(ui_TempErrBase, lv_color_make(0xFF,0x40,0x40), 0);
+    lv_obj_set_style_text_color(ui_TempErrBase, UI_COL_ERR, 0);
     lv_obj_set_pos(ui_TempErrBase, 0, 126);
 
     ui_TempBarBase = make_bar(pb, 0, 132, 222, 8, UI_COL_ACCENT);
 
     // Panel CIELO
     lv_obj_t* pc = lv_obj_create(ui_ScreenTemp);
+    ui_PanelCielo = pc;
     lv_obj_set_pos(pc, 238, 33); lv_obj_set_size(pc, 240, 150);
-    lv_obj_set_style_bg_color(pc, lv_color_make(0x14,0x14,0x22), 0);
+    lv_obj_set_style_bg_color(pc, UI_COL_SURFACE, 0);
     lv_obj_set_style_bg_opa(pc, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(pc, UI_COL_CIELO, 0);
     lv_obj_set_style_border_width(pc, 2, 0);
@@ -581,6 +772,7 @@ static void build_temp() {
     lv_obj_clear_flag(pc, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* lc = lv_label_create(pc); lv_label_set_text(lc, "CIELO");
+    s_TempLblTitleCielo = lc;
     lv_obj_set_style_text_font(lc, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(lc, UI_COL_CIELO, 0); lv_obj_set_pos(lc, 0, 0);
 
@@ -593,10 +785,11 @@ static void build_temp() {
     lv_obj_set_style_text_align(ui_TempSetCielo, LV_TEXT_ALIGN_CENTER, 0);
 
     // Bottoni ± CIELO con bounce (gestito da make_pm)
-    make_pm(pc, 116, 14, 100, 44, "+", UI_COL_CIELO, cb_cielo_plus);
-    make_pm(pc, 116, 62, 100, 44, "-", UI_COL_CIELO, cb_cielo_minus);
+    s_TempPmCieloP = make_pm(pc, 116, 14, 100, 44, "+", UI_COL_CIELO, cb_cielo_plus);
+    s_TempPmCieloM = make_pm(pc, 116, 62, 100, 44, "-", UI_COL_CIELO, cb_cielo_minus);
 
     lv_obj_t* scl = lv_label_create(pc);
+    s_TempLblStepCielo = scl;
     lv_label_set_text(scl, "5\xC2\xB0""C");
     lv_obj_set_style_text_font(scl, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(scl, UI_COL_GRAY, 0);
@@ -604,13 +797,13 @@ static void build_temp() {
 
     ui_TempErrCielo = lv_label_create(pc); lv_label_set_text(ui_TempErrCielo, "");
     lv_obj_set_style_text_font(ui_TempErrCielo, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(ui_TempErrCielo, lv_color_make(0xFF,0x40,0x40), 0);
+    lv_obj_set_style_text_color(ui_TempErrCielo, UI_COL_ERR, 0);
     lv_obj_set_pos(ui_TempErrCielo, 0, 126);
 
     ui_TempBarCielo = make_bar(pc, 0, 132, 228, 8, UI_COL_CIELO);
 
     // Sep y=183
-    make_sep(ui_ScreenTemp, 183, lv_color_make(0x30,0x30,0x48));
+    //make_sep(ui_ScreenTemp, 183, UI_COL_BORDER);
 
     // Nav azioni y=185 h=40
     auto make_nav_action = [&](int x, lv_color_t bg, lv_color_t border,
@@ -631,22 +824,22 @@ static void build_temp() {
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(l);
     };
-    // Tre pulsanti distribuiti orizzontalmente: RICETTE, TIMER, PID
-    make_nav_action(  5, lv_color_make(0x00,0x20,0x10), lv_color_make(0x00,0xFF,0x90),
-                   LV_SYMBOL_LIST " RICETTE",  lv_color_make(0x00,0xFF,0x90), cb_goto_ricette);
-    make_nav_action(165, lv_color_make(0x10,0x10,0x28), lv_color_make(0x80,0x80,0xFF),
-                   LV_SYMBOL_LOOP " TIMER",    lv_color_make(0x80,0x80,0xFF), cb_goto_timer);
-    make_nav_action(325, lv_color_make(0x00,0x14,0x24), UI_COL_TUNING,
-                   LV_SYMBOL_SETTINGS " PID",  UI_COL_TUNING,                 cb_goto_pid_base);
+    // Tre pulsanti: stesso stile card
+    make_nav_action(  5, UI_COL_SURFACE_ALT, UI_COL_BORDER,
+                   LV_SYMBOL_LIST " RICETTE",  UI_COL_GRAY, cb_goto_ricette);
+    make_nav_action(165, UI_COL_SURFACE_ALT, UI_COL_BORDER,
+                   LV_SYMBOL_LOOP " TIMER",    UI_COL_GRAY, cb_goto_timer);
+    make_nav_action(325, UI_COL_SURFACE_ALT, UI_COL_BORDER,
+                   LV_SYMBOL_SETTINGS " PID",  UI_COL_GRAY,                 cb_goto_pid_base);
 
     // Sep y=225
-    make_sep(ui_ScreenTemp, 225, UI_COL_SINGLE);
+    //make_sep(ui_ScreenTemp, 225, UI_COL_BORDER);
 
     // Mode toggle
     ui_BtnModeToggle = lv_btn_create(ui_ScreenTemp);
     lv_obj_set_pos(ui_BtnModeToggle, 2, 227); lv_obj_set_size(ui_BtnModeToggle, 150, 43);
-    lv_obj_set_style_bg_color(ui_BtnModeToggle, lv_color_make(0x18,0x00,0x28), 0);
-    lv_obj_set_style_border_color(ui_BtnModeToggle, UI_COL_SINGLE, 0);
+    lv_obj_set_style_bg_color(ui_BtnModeToggle, UI_COL_SURFACE_ALT, 0);
+    lv_obj_set_style_border_color(ui_BtnModeToggle, UI_COL_BORDER, 0);
     lv_obj_set_style_border_width(ui_BtnModeToggle, 2, 0);
     lv_obj_set_style_radius(ui_BtnModeToggle, 8, 0);
     lv_obj_set_style_shadow_width(ui_BtnModeToggle, 0, 0);
@@ -655,14 +848,14 @@ static void build_temp() {
     ui_LabelMode = lv_label_create(ui_BtnModeToggle);
     lv_label_set_text(ui_LabelMode, LV_SYMBOL_PAUSE " SINGLE");
     lv_obj_set_style_text_font(ui_LabelMode, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(ui_LabelMode, UI_COL_SINGLE, 0);
+    lv_obj_set_style_text_color(ui_LabelMode, UI_COL_TEXT_DIM, 0);
     lv_obj_center(ui_LabelMode);
 
     // PanelSplit
     ui_PanelSplit = lv_obj_create(ui_ScreenTemp);
     lv_obj_set_pos(ui_PanelSplit, 154, 227); lv_obj_set_size(ui_PanelSplit, 324, 43);
-    lv_obj_set_style_bg_color(ui_PanelSplit, lv_color_make(0x12,0x00,0x22), 0);
-    lv_obj_set_style_border_color(ui_PanelSplit, UI_COL_SINGLE, 0);
+    lv_obj_set_style_bg_color(ui_PanelSplit, UI_COL_SURFACE_ALT, 0);
+    lv_obj_set_style_border_color(ui_PanelSplit, UI_COL_BORDER, 0);
     lv_obj_set_style_border_width(ui_PanelSplit, 1, 0);
     lv_obj_set_style_radius(ui_PanelSplit, 8, 0);
     lv_obj_set_style_pad_all(ui_PanelSplit, 4, 0);
@@ -680,7 +873,7 @@ static void build_temp() {
 
     lv_obj_t* vsep = lv_obj_create(ui_PanelSplit);
     lv_obj_set_pos(vsep, 154, 4); lv_obj_set_size(vsep, 2, 35);
-    lv_obj_set_style_bg_color(vsep, UI_COL_SINGLE, 0);
+    lv_obj_set_style_bg_color(vsep, UI_COL_BORDER, 0);
     lv_obj_set_style_bg_opa(vsep, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(vsep, 0, 0);
 
@@ -1052,7 +1245,7 @@ static void build_graph() {
     }
 
     // ── Separatore y=196 ──────────────────────────────────────────
-    make_sep(ui_ScreenGraph, GCVS_Y + GCVS_H + 2, lv_color_make(0x30,0x60,0x10));
+    //make_sep(ui_ScreenGraph, GCVS_Y + GCVS_H + 2, lv_color_make(0x30,0x60,0x10));
 
     // ── Info labels ───────────────────────────────────────────────
     ui_GraphTimeLbl = lv_label_create(ui_ScreenGraph);
@@ -1269,10 +1462,12 @@ void ui_show_screen(Screen s) {
 void ui_refresh(AppState* s) {
     if (!s) return;
 
+    ui_apply_main_sensor_layout(s->sensor_mode == SensorMode::SINGLE);
+
     // Temperatura BASE
     if (s->tc_base_err) {
         lv_label_set_text(ui_LabelTempBase, "ERR");
-        lv_obj_set_style_text_color(ui_LabelTempBase, lv_color_make(0xFF,0x40,0x40), 0);
+        lv_obj_set_style_text_color(ui_LabelTempBase, UI_COL_ERR, 0);
         lv_label_set_text(ui_LabelErrBase, "TC ERR");
     } else {
         char buf[16];
@@ -1286,7 +1481,7 @@ void ui_refresh(AppState* s) {
     // Temperatura CIELO
     if (s->tc_cielo_err) {
         lv_label_set_text(ui_LabelTempCielo, "ERR");
-        lv_obj_set_style_text_color(ui_LabelTempCielo, lv_color_make(0xFF,0x40,0x40), 0);
+        lv_obj_set_style_text_color(ui_LabelTempCielo, UI_COL_ERR, 0);
         lv_label_set_text(ui_LabelErrCielo, "TC ERR");
     } else {
         char buf[16];
@@ -1330,7 +1525,7 @@ void ui_refresh(AppState* s) {
 
     // Bottoni ON/OFF BASE
     if (s->base_enabled) {
-        lv_obj_set_style_bg_color(ui_BtnEnBase, lv_color_make(0x28,0x10,0x00), 0);
+        lv_obj_set_style_bg_color(ui_BtnEnBase, UI_COL_SURFACE_ALT, 0);
         lv_obj_set_style_border_color(ui_BtnEnBase, UI_COL_ACCENT, 0);
         lv_label_set_text(ui_LabelBtnBase, s->preheat_base ?
             LV_SYMBOL_WARNING " PRERISCALDO" : "BASE ON");
@@ -1339,8 +1534,8 @@ void ui_refresh(AppState* s) {
         lv_obj_set_style_text_color(ui_LabelBtnBase, UI_COL_ACCENT,
                                     LV_PART_MAIN | LV_STATE_PRESSED);
     } else {
-        lv_obj_set_style_bg_color(ui_BtnEnBase, lv_color_make(0x20,0x20,0x2E), 0);
-        lv_obj_set_style_border_color(ui_BtnEnBase, lv_color_make(0x48,0x48,0x60), 0);
+        lv_obj_set_style_bg_color(ui_BtnEnBase, UI_COL_SURFACE_ALT, 0);
+        lv_obj_set_style_border_color(ui_BtnEnBase, UI_COL_BORDER, 0);
         lv_label_set_text(ui_LabelBtnBase, "BASE OFF");
         lv_color_t g = lv_color_make(0xA0,0xA0,0xB8);
         lv_obj_set_style_text_color(ui_LabelBtnBase, g, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1349,7 +1544,7 @@ void ui_refresh(AppState* s) {
 
     // Bottoni ON/OFF CIELO
     if (s->cielo_enabled) {
-        lv_obj_set_style_bg_color(ui_BtnEnCielo, lv_color_make(0x28,0x08,0x08), 0);
+        lv_obj_set_style_bg_color(ui_BtnEnCielo, UI_COL_SURFACE_ALT, 0);
         lv_obj_set_style_border_color(ui_BtnEnCielo, UI_COL_CIELO, 0);
         lv_label_set_text(ui_LabelBtnCielo, s->preheat_cielo ?
             LV_SYMBOL_WARNING " PRERISCALDO" : "CIELO ON");
@@ -1358,8 +1553,8 @@ void ui_refresh(AppState* s) {
         lv_obj_set_style_text_color(ui_LabelBtnCielo, UI_COL_CIELO,
                                     LV_PART_MAIN | LV_STATE_PRESSED);
     } else {
-        lv_obj_set_style_bg_color(ui_BtnEnCielo, lv_color_make(0x20,0x20,0x2E), 0);
-        lv_obj_set_style_border_color(ui_BtnEnCielo, lv_color_make(0x48,0x48,0x60), 0);
+        lv_obj_set_style_bg_color(ui_BtnEnCielo, UI_COL_SURFACE_ALT, 0);
+        lv_obj_set_style_border_color(ui_BtnEnCielo, UI_COL_BORDER, 0);
         lv_label_set_text(ui_LabelBtnCielo, "CIELO OFF");
         lv_color_t g = lv_color_make(0xA0,0xA0,0xB8);
         lv_obj_set_style_text_color(ui_LabelBtnCielo, g, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1368,7 +1563,7 @@ void ui_refresh(AppState* s) {
 
     // Bottone LUCE
     if (s->luce_on) {
-        lv_obj_set_style_bg_color(ui_BtnLuce, lv_color_make(0x28,0x24,0x00), 0);
+        lv_obj_set_style_bg_color(ui_BtnLuce, UI_COL_SURFACE_ALT, 0);
         lv_obj_set_style_border_color(ui_BtnLuce, UI_COL_LUCE, 0);
         lv_label_set_text(ui_LabelBtnLuce, LV_SYMBOL_CHARGE " LUCE ON");
         lv_obj_set_style_text_color(ui_LabelBtnLuce, UI_COL_LUCE,
@@ -1376,8 +1571,8 @@ void ui_refresh(AppState* s) {
         lv_obj_set_style_text_color(ui_LabelBtnLuce, UI_COL_LUCE,
                                     LV_PART_MAIN | LV_STATE_PRESSED);
     } else {
-        lv_obj_set_style_bg_color(ui_BtnLuce, lv_color_make(0x20,0x20,0x2E), 0);
-        lv_obj_set_style_border_color(ui_BtnLuce, lv_color_make(0x48,0x48,0x60), 0);
+        lv_obj_set_style_bg_color(ui_BtnLuce, UI_COL_SURFACE_ALT, 0);
+        lv_obj_set_style_border_color(ui_BtnLuce, UI_COL_BORDER, 0);
         lv_label_set_text(ui_LabelBtnLuce, LV_SYMBOL_CHARGE " LUCE OFF");
         lv_color_t g = lv_color_make(0xA0,0xA0,0xB8);
         lv_obj_set_style_text_color(ui_LabelBtnLuce, g, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1406,7 +1601,7 @@ void ui_refresh(AppState* s) {
     // Status bar
     if (s->safety_shutdown) {
         lv_label_set_text(ui_LabelStatus, LV_SYMBOL_WARNING " SICUREZZA ATTIVA");
-        lv_obj_set_style_text_color(ui_LabelStatus, lv_color_make(0xFF,0x40,0x00), 0);
+        lv_obj_set_style_text_color(ui_LabelStatus, UI_COL_ERR, 0);
     } else if (!s->base_enabled && !s->cielo_enabled) {
         lv_label_set_text(ui_LabelStatus, "Sistema pronto");
         lv_obj_set_style_text_color(ui_LabelStatus, UI_COL_GRAY, 0);
@@ -1415,7 +1610,13 @@ void ui_refresh(AppState* s) {
         lv_obj_set_style_text_color(ui_LabelStatus, UI_COL_ACCENT2, 0);
     } else {
         char buf[56];
-        if (s->tc_base_err && s->tc_cielo_err)
+        if (s->sensor_mode == SensorMode::SINGLE) {
+            if (s->tc_cielo_err)
+                snprintf(buf, sizeof(buf), "TC ERR  set %.0f\xC2\xB0""C", s->set_cielo);
+            else
+                snprintf(buf, sizeof(buf), "CIELO  %.0f / %.0f\xC2\xB0""C",
+                         s->temp_cielo, s->set_cielo);
+        } else if (s->tc_base_err && s->tc_cielo_err)
             snprintf(buf, sizeof(buf), "B:ERR/%.0f\xC2\xB0  C:ERR/%.0f\xC2\xB0", s->set_base, s->set_cielo);
         else if (s->tc_base_err)
             snprintf(buf, sizeof(buf), "B:ERR/%.0f\xC2\xB0  C:%.0f/%.0f\xC2\xB0", s->set_base, s->temp_cielo, s->set_cielo);
@@ -1449,18 +1650,25 @@ void ui_refresh(AppState* s) {
             lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
             lv_bar_set_value(bar, pct, LV_ANIM_OFF);
             lv_color_t col;
-            if      (pct < 40) col = lv_color_make(0x00, 0x80, 0xFF);
-            else if (pct < 70) col = lv_color_make(0xFF, 0x9E, 0x40);
-            else if (pct < 92) col = lv_color_make(0xFF, 0x6B, 0x00);
-            else               col = UI_COL_GREEN;
+            if      (pct < 40) col = lv_color_make(0x50, 0x54, 0x60);
+            else if (pct < 70) col = lv_color_make(0x88, 0x7C, 0x68);
+            else if (pct < 92) col = lv_color_make(0xB0, 0x90, 0x58);
+            else               col = lv_color_make(0x78, 0x98, 0x80);
             lv_obj_set_style_bg_color(bar, col, LV_PART_INDICATOR);
         } else {
             lv_bar_set_value(bar, 0, LV_ANIM_OFF);
             lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
         }
     };
-    upd_preheat(ui_BarPreheatBase,  s->preheat_base,  s->tc_base_err,  s->temp_base,  s->set_base);
-    upd_preheat(ui_BarPreheatCielo, s->preheat_cielo, s->tc_cielo_err, s->temp_cielo, s->set_cielo);
+    if (s->sensor_mode == SensorMode::DUAL) {
+        upd_preheat(ui_BarPreheatBase,  s->preheat_base,  s->tc_base_err,  s->temp_base,  s->set_base);
+    } else {
+        lv_obj_add_flag(ui_BarPreheatBase, LV_OBJ_FLAG_HIDDEN);
+    }
+    bool ph_cielo = s->preheat_cielo;
+    if (s->sensor_mode == SensorMode::SINGLE)
+        ph_cielo = ph_cielo || s->preheat_base;
+    upd_preheat(ui_BarPreheatCielo, ph_cielo, s->tc_cielo_err, s->temp_cielo, s->set_cielo);
 }
 
 // ================================================================
@@ -1468,6 +1676,14 @@ void ui_refresh(AppState* s) {
 // ================================================================
 void ui_refresh_temp(AppState* s) {
     if (!s) return;
+
+    bool is_single = (s->sensor_mode == SensorMode::SINGLE);
+
+    // In SINGLE mode: set_base segue sempre set_cielo
+    if (is_single) s->set_base = s->set_cielo;
+
+    ui_apply_temp_sensor_layout(is_single);
+
     // Archi setpoint (senza animazioni)
     if (ui_ArcBase)  lv_arc_set_value(ui_ArcBase,  (int16_t)s->set_base);
     if (ui_ArcCielo) lv_arc_set_value(ui_ArcCielo, (int16_t)s->set_cielo);
@@ -1517,19 +1733,16 @@ void ui_refresh_temp(AppState* s) {
                                     LV_PART_MAIN | LV_STATE_DEFAULT);
     }
 
-    // Mode/split
-    bool is_single = (s->sensor_mode == SensorMode::SINGLE);
+    // Mode/split (stesso stile visivo per SINGLE/DUAL; si distingue solo l’etichetta)
     if (is_single) {
         lv_label_set_text(ui_LabelMode, LV_SYMBOL_PAUSE " SINGLE");
-        lv_obj_set_style_text_color(ui_LabelMode, UI_COL_SINGLE, 0);
-        lv_obj_set_style_border_color(ui_BtnModeToggle, UI_COL_SINGLE, 0);
-        // In modalità SINGLE mostriamo comunque la parzializzazione,
-        // così il valore di BASE è sempre visibile.
+        lv_obj_set_style_text_color(ui_LabelMode, UI_COL_TEXT_DIM, 0);
+        lv_obj_set_style_border_color(ui_BtnModeToggle, UI_COL_BORDER, 0);
         lv_obj_clear_flag(ui_PanelSplit, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_label_set_text(ui_LabelMode, LV_SYMBOL_SHUFFLE " DUAL");
-        lv_obj_set_style_text_color(ui_LabelMode, UI_COL_DUAL, 0);
-        lv_obj_set_style_border_color(ui_BtnModeToggle, UI_COL_DUAL, 0);
+        lv_obj_set_style_text_color(ui_LabelMode, UI_COL_TEXT_DIM, 0);
+        lv_obj_set_style_border_color(ui_BtnModeToggle, UI_COL_BORDER, 0);
         lv_obj_clear_flag(ui_PanelSplit, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -1766,7 +1979,7 @@ void ui_refresh_graph(AppState* s) {
     // ── Aggiorna label info ────────────────────────────────────────
     {
         char buf[32];
-        snprintf(buf, sizeof(buf), "%d min", g_graph_minutes);
+        snprintf(buf, sizeof(buf), "Ultimi %d min", g_graph_minutes);
         lv_label_set_text(ui_GraphTimeLbl, buf);
 
         if (max_t > 50.f) {

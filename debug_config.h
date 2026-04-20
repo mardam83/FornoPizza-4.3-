@@ -1,56 +1,45 @@
 /**
  * debug_config.h — Forno Pizza S3 — Configurazione Debug & Task
  * ================================================================
- * Modifica questo file per controllare:
- *   - Quali task FreeRTOS vengono avviati
- *   - Livello di verbosità del log seriale
- *   - Feature opzionali (WiFi, OTA, Autotune, Safety)
+ * SIMULATOR_MODE=1 → nessun hardware reale richiesto.
+ * Solo display collegato. Tutto il resto è virtuale.
  *
- * REGOLA: definire a 1 = abilitato, 0 = disabilitato
+ * SEQUENZA TEST AUTOMATICA (vedi simulator.h):
+ *   FASE 1 — Riscaldamento PID normale fino a setpoint
+ *   FASE 2 — Test OVERTEMP: temperatura forzata a 490°C → SHUTDOWN
+ *   FASE 3 — Reset, test TC_ERROR: sensore forzato NAN → SHUTDOWN
+ *   FASE 4 — Reset, test Autotune relay oscillation → Kp/Ki/Kd
+ *   FASE 5 — Riscaldamento finale con parametri autotune
  *
- * WORKFLOW TIPICO:
- *   Debug display/touch  → TASK_PID=0, TASK_WDG=0, TASK_WIFI=0
- *                          LOG_LVGL=LOG_LEVEL_DEBUG
- *   Debug PID/relay      → TASK_WIFI=0, LOG_PID=LOG_LEVEL_DEBUG
- *   Produzione           → tutto 1, LOG a INFO tranne LOG_SAFETY
+ * Ogni fase produce log dettagliato su Serial con prefisso [TEST].
  * ================================================================
  */
 
 #pragma once
 
 // ================================================================
+//  SIMULATORE HARDWARE
+// ================================================================
+#define SIMULATOR_MODE        1   // 1=simulatore, 0=hardware reale
+
+// ================================================================
 //  TASK ENABLE
 // ================================================================
-
-// Task PID: lettura TC, calcolo PID, relay duty cycle
-#define TASK_PID_ENABLE       1   // [PROD] 1
-
-// Task Watchdog: supervisione heartbeat Task_PID
-// ⚠ DEVE essere 0 se TASK_PID_ENABLE=0 (altrimenti WDG timeout immediato)
-#define TASK_WDG_ENABLE       1   // [PROD] 1
-
-// Task LVGL: rendering UI, refresh schermate
+#define TASK_PID_ENABLE       1
+#define TASK_WDG_ENABLE       1
 #define TASK_LVGL_ENABLE      1
-
-// Task WiFi/MQTT
-#define TASK_WIFI_ENABLE      1   // [PROD] 1
+#define TASK_WIFI_ENABLE      0   // non necessario per test HW
 
 // ================================================================
 //  FEATURE ENABLE
 // ================================================================
 #define FEATURE_SPLASH        1
-#define FEATURE_SAFETY        1   // [PROD] 1
+#define FEATURE_SAFETY        1
 #define FEATURE_AUTOTUNE      1
-#define FEATURE_OTA           1
+#define FEATURE_OTA           0
 
 // ================================================================
-//  LOG SERIALE — livelli per modulo
-//
-//  LOG_LEVEL_NONE  0   nessun output
-//  LOG_LEVEL_ERROR 1   solo errori fatali
-//  LOG_LEVEL_WARN  2   errori + avvisi
-//  LOG_LEVEL_INFO  3   info operative
-//  LOG_LEVEL_DEBUG 4   dettaglio completo (verbose)
+//  LOG SERIALE
 // ================================================================
 #define LOG_LEVEL_NONE   0
 #define LOG_LEVEL_ERROR  1
@@ -58,26 +47,13 @@
 #define LOG_LEVEL_INFO   3
 #define LOG_LEVEL_DEBUG  4
 
-// Log di sistema / avvio / memoria
-#define LOG_SYSTEM        LOG_LEVEL_DEBUG
-
-// Log Task_PID
-#define LOG_PID           LOG_LEVEL_DEBUG   // [PROD] LOG_LEVEL_INFO
-
-// Log Task_Watchdog
-#define LOG_WDG           LOG_LEVEL_DEBUG   // [PROD] LOG_LEVEL_WARN
-
-// Log Task_LVGL — era WARN in repo, non stampava nulla di utile
-#define LOG_LVGL          LOG_LEVEL_DEBUG   // [PROD] LOG_LEVEL_WARN
-
-// Log WiFi/MQTT
-#define LOG_WIFI          LOG_LEVEL_DEBUG   // [PROD] LOG_LEVEL_INFO
-
-// Log Safety — sempre almeno WARN
-#define LOG_SAFETY        LOG_LEVEL_DEBUG   // [PROD] LOG_LEVEL_WARN
-
-// Log memoria PSRAM/SRAM
-#define LOG_MEMORY        LOG_LEVEL_DEBUG   // [PROD] LOG_LEVEL_INFO
+#define LOG_SYSTEM        LOG_LEVEL_INFO
+#define LOG_PID           LOG_LEVEL_INFO
+#define LOG_WDG           LOG_LEVEL_INFO
+#define LOG_LVGL          LOG_LEVEL_WARN
+#define LOG_WIFI          LOG_LEVEL_NONE
+#define LOG_SAFETY        LOG_LEVEL_INFO
+#define LOG_MEMORY        LOG_LEVEL_INFO
 
 // ================================================================
 //  MACRO DI LOG
@@ -99,13 +75,7 @@
 // ================================================================
 #if TASK_WDG_ENABLE && !TASK_PID_ENABLE
   #warning "TASK_WDG_ENABLE=1 con TASK_PID_ENABLE=0: watchdog timeout immediato!"
-  #warning "→ Imposta TASK_WDG_ENABLE=0 quando TASK_PID_ENABLE=0"
 #endif
-
-#if FEATURE_OTA && !TASK_WIFI_ENABLE
-  #warning "FEATURE_OTA=1 richiede TASK_WIFI_ENABLE=1 — OTA disabilitato in pratica"
-#endif
-
-#if !FEATURE_SAFETY
-  #warning "FEATURE_SAFETY=0: sistema di sicurezza disabilitato — solo per test!"
+#if SIMULATOR_MODE && !TASK_PID_ENABLE
+  #warning "SIMULATOR_MODE=1 richiede TASK_PID_ENABLE=1"
 #endif

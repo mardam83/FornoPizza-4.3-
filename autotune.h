@@ -11,7 +11,8 @@
  *   1. Utente imposta autotune_split (% potenza Base, default 50)
  *   2. START  → entra in modalità AUTOTUNE
  *      - Sospende PID normale
- *      - Usa un solo sensore (Cielo, come in modalità SINGLE)
+ *      - SINGLE: PV = sonda Cielo (Base segue la stessa lettura)
+ *      - DUAL:   PV = media (Base+Cielo) se entrambe valide, altrimenti la sonda ok
  *      - Accende Base e Cielo con la split impostata
  *      - La libreria oscilla attorno al setpoint_cielo corrente
  *   3. Dopo ~5 cicli completi → calcola Kp/Ki/Kd
@@ -45,6 +46,9 @@
 // ================================================================
 void autotune_start();   // avvia — chiamato da Task_PID o callback MQTT
 void autotune_stop();    // interrompe
-void autotune_run(float temp_cielo, uint32_t now_ms);
-                         // chiamato ogni ciclo in Task_PID
+/** Split % Base da parzializzazione (clamp 5–95); chiamare prima di autotune_start se serve override manuale */
+void autotune_apply_default_split(void);
+void autotune_run(float temp_pv, uint32_t now_ms);  // PV = Cielo (SINGLE) o media (DUAL)
 bool autotune_is_running();
+/** Task_PID: se true, non sovrascrivere g_state.relay con l'uscita PID (appena finito autotune nello stesso tick) */
+bool autotune_consume_just_completed(void);

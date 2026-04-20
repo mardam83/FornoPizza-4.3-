@@ -158,6 +158,10 @@ extern SemaphoreHandle_t g_mutex;
 #define WDG_CHECK_MS           500
 #define TC_READ_TIMEOUT_MS    2000
 
+// Runaway — riferimento: camera ~35×35×10 cm, resistenze totali ~2200 W (vedi modello in simulator.h).
+// RUNAWAY_UP: salita rapida con relay logicamente spenti (es. SSR incollato / perdita controllo).
+// RUNAWAY_DOWN: dopo essere stati vicini al setpoint, calo forte con richiesta calore ancora attiva
+//               (elemento aperto, sensore disancorato, ecc.).
 #define RUNAWAY_DOWN_ENABLED   1
 #define RUNAWAY_DOWN_MS        300000
 #define RUNAWAY_MIN_DROP       60.0f

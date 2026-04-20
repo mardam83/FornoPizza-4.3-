@@ -138,6 +138,8 @@ extern lv_obj_t* ui_BtnNavWifi;
 //  WIDGET — TEMP
 // ================================================================
 extern lv_obj_t* ui_ScreenTemp;
+extern lv_obj_t* ui_PanelBase;
+extern lv_obj_t* ui_PanelCielo;
 extern lv_obj_t* ui_ArcBase;
 extern lv_obj_t* ui_ArcCielo;
 extern lv_obj_t* ui_TempSetBase;
@@ -223,29 +225,43 @@ extern lv_obj_t* ui_AutoLblCielo;
 
 // ================================================================
 //  COLORI UI — definiti qui così sono visibili a ui.cpp, ui_events.cpp, ecc.
+//
+//  Dove modificare il tema:
+//    • Palette principale: macro UI_COL_* in questo file (sfondo, superfici, bordi).
+//    • Accenti BASE / CIELO / LUCE: UI_COL_ACCENT, UI_COL_CIELO, UI_COL_LUCE.
+//    • Temperatura dinamica (main): funzione ui_temp_color() poco sotto.
+//    • Pannelli e widget costruiti in: ui.cpp (build_main, build_temp, …).
 // ================================================================
-#define UI_COL_BG        lv_color_make(0x10,0x10,0x1A)
-#define UI_COL_ACCENT    lv_color_make(0xFF,0x6B,0x00)   // arancio BASE
-#define UI_COL_ACCENT2   lv_color_make(0xFF,0x9E,0x40)   // arancio chiaro (preheating)
-#define UI_COL_CIELO     lv_color_make(0xFF,0x30,0x30)   // rosso CIELO
-#define UI_COL_LUCE      lv_color_make(0xFF,0xE0,0x00)   // giallo luce
-#define UI_COL_TUNING    lv_color_make(0x00,0xC0,0xFF)   // azzurro PID tuning
-#define UI_COL_SINGLE    lv_color_make(0xA0,0x00,0xFF)   // viola modo SINGLE
-#define UI_COL_DUAL      lv_color_make(0x00,0xC0,0xFF)   // cyan modo DUAL
-#define UI_COL_WHITE     lv_color_make(0xFF,0xFF,0xFF)
-#define UI_COL_GRAY      lv_color_make(0x60,0x60,0x70)
-#define UI_COL_DARKGRAY  lv_color_make(0x28,0x28,0x38)
-#define UI_COL_GREEN     lv_color_make(0x00,0xE6,0x76)   // verde OK/save
-#define UI_COL_CYAN      lv_color_make(0x00,0xD4,0xFF)   // cyan nav
-#define UI_COL_YELLOW    lv_color_make(0xFF,0xE0,0x00)   // giallo setpoint
+#define UI_COL_BG          lv_color_make(0x0C,0x12,0x1A)
+#define UI_COL_SURFACE     lv_color_make(0x10,0x18,0x22)
+#define UI_COL_SURFACE_ALT lv_color_make(0x14,0x1C,0x28)
+#define UI_COL_BORDER      lv_color_make(0x38,0x48,0x58)
+#define UI_COL_TEXT_DIM    lv_color_make(0x90,0xA0,0xB0)
+#define UI_COL_ERR         lv_color_make(0xC0,0x68,0x62)
+// BASE: sabbia calda; CIELO / nav / fan: celeste coerente
+#define UI_COL_ACCENT      lv_color_make(0xC4,0x98,0x68)
+#define UI_COL_ACCENT2     lv_color_make(0xB8,0xA8,0x90)
+#define UI_COL_CIELO       lv_color_make(0x58,0xB0,0xD0)
+#define UI_COL_LUCE        lv_color_make(0xD4,0xC8,0x78)
+#define UI_COL_TUNING      lv_color_make(0x68,0xA8,0xC8)
+#define UI_COL_SETPOINT    lv_color_make(0xD8,0xE4,0xEC)
+#define UI_COL_SINGLE      UI_COL_TEXT_DIM
+#define UI_COL_DUAL        UI_COL_TEXT_DIM
+#define UI_COL_WHITE       lv_color_make(0xF0,0xF0,0xF4)
+#define UI_COL_GRAY        lv_color_make(0x78,0x7C,0x88)
+#define UI_COL_DARKGRAY    lv_color_make(0x28,0x2A,0x34)
+#define UI_COL_GREEN       lv_color_make(0x58,0xA0,0x88)
+#define UI_COL_CYAN        lv_color_make(0x58,0xA8,0xC8)
+#define UI_COL_YELLOW      UI_COL_SETPOINT
 
-// Colore temperatura progressivo: freddo → caldo → target → sopra
+// Temperatura: freddo → celeste/grigi → chiaro a target → errore se sopra
 inline lv_color_t ui_temp_color(double t, double sp) {
-  if      (t < sp * 0.60) return lv_color_make(0x00,0x80,0xFF);  // blu freddo
-  else if (t < sp * 0.85) return lv_color_make(0x00,0xD4,0xFF);  // cyan
-  else if (t < sp - 5.0)  return UI_COL_YELLOW;                   // giallo vicino
-  else if (t <= sp + 5.0) return UI_COL_GREEN;                    // verde a target
-  else                    return lv_color_make(0xFF,0x30,0x30);   // rosso sopra
+  if (sp <= 0.0) return UI_COL_TEXT_DIM;
+  const double r = t / sp;
+  if (r < 0.50) return lv_color_make(0x50, 0x78, 0x90);
+  if (r < 0.82) return lv_color_make(0x68, 0xA8, 0xC8);
+  if (t <= sp + 4.0) return lv_color_make(0xC8, 0xDC, 0xE8);
+  return UI_COL_ERR;
 }
 
 // ================================================================

@@ -24,14 +24,37 @@ static float    saved_kd_base     = 0;
 static float    saved_kp_cielo    = 0;
 static float    saved_ki_cielo    = 0;
 static float    saved_kd_cielo    = 0;
+static bool     saved_base_enabled  = false;
+static bool     saved_cielo_enabled = false;
 static uint32_t at_start_ms       = 0;
 static int      at_prev_cycles    = 0;
+static bool     s_just_completed  = false;
+
+bool autotune_consume_just_completed(void) {
+  bool v = s_just_completed;
+  s_just_completed = false;
+  return v;
+}
+
+// ================================================================
+//  autotune_apply_default_split — % Base da parzializzazione corrente
+// ================================================================
+void autotune_apply_default_split(void) {
+  if (!MUTEX_TAKE_MS(50)) return;
+  int p = g_state.pct_base;
+  if (p < 5)  p = 5;
+  if (p > 95) p = 95;
+  g_state.autotune_split = p;
+  xSemaphoreGive(g_mutex);
+}
 
 // ================================================================
 //  autotune_start
 // ================================================================
 void autotune_start() {
   if (at_running) return;
+
+  at_tuner.Cancel();
 
   // Salva parametri correnti per eventuale ripristino
   if (MUTEX_TAKE_MS(50)) {
@@ -42,9 +65,33 @@ void autotune_start() {
     saved_ki_cielo = g_state.ki_cielo;
     saved_kd_cielo = g_state.kd_cielo;
 
-    // Imposta setpoint autotune leggermente sotto quello corrente
-    // per partire con il forno in salita controllata
-    at_input  = (double)g_state.temp_cielo;
+    saved_base_enabled  = g_state.base_enabled;
+    saved_cielo_enabled = g_state.cielo_enabled;
+    g_state.base_enabled  = true;
+    g_state.cielo_enabled = true;
+
+    {
+      int sp = g_state.autotune_split;
+      if (sp < 5 || sp > 95) {
+        int p = g_state.pct_base;
+        if (p < 5) p = 5;
+        if (p > 95) p = 95;
+        g_state.autotune_split = p;
+      }
+    }
+
+    double pv = g_state.temp_cielo;
+    if (g_state.sensor_mode == SensorMode::DUAL) {
+      if (!g_state.tc_base_err && !g_state.tc_cielo_err) {
+        pv = (g_state.temp_base + g_state.temp_cielo) * 0.5;
+      } else if (!g_state.tc_cielo_err) {
+        pv = g_state.temp_cielo;
+      } else if (!g_state.tc_base_err) {
+        pv = g_state.temp_base;
+      }
+    }
+
+    at_input  = pv;
     at_output = 50.0;  // output iniziale 50%
 
     g_state.autotune_status = AutotuneStatus::RUNNING;
@@ -65,8 +112,9 @@ void autotune_start() {
   at_start_ms    = millis();
   at_prev_cycles = 0;
 
-  Serial.printf("[AUTOTUNE] Avviato — setpoint=%.1f split=%d/%d\n",
-    g_state.set_cielo,
+  Serial.printf("[AUTOTUNE] Avviato — mode=%s  PV=%.1f°C  split=%d/%d\n",
+    g_state.sensor_mode == SensorMode::SINGLE ? "SINGLE" : "DUAL",
+    (float)at_input,
     g_state.autotune_split,
     100 - g_state.autotune_split);
 }
@@ -77,6 +125,7 @@ void autotune_start() {
 void autotune_stop() {
   if (!at_running) return;
   at_running = false;
+  at_tuner.Cancel();
 
   if (MUTEX_TAKE_MS(50)) {
     // Ripristina parametri originali
@@ -87,11 +136,13 @@ void autotune_stop() {
     g_state.ki_cielo = saved_ki_cielo;
     g_state.kd_cielo = saved_kd_cielo;
     g_state.autotune_status = AutotuneStatus::ABORTED;
-    // Spegni relay
-    g_state.base_enabled  = false;
-    g_state.cielo_enabled = false;
+    g_state.base_enabled  = saved_base_enabled;
+    g_state.cielo_enabled = saved_cielo_enabled;
     xSemaphoreGive(g_mutex);
   }
+
+  RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  false);
+  RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, false);
 
   Serial.println("[AUTOTUNE] Interrotto — parametri originali ripristinati");
 }
@@ -111,11 +162,11 @@ bool autotune_is_running() { return at_running; }
 //    Relay BASE e CIELO commutano con time-proportional
 //    usando la stessa finestra PID normale (PID_WINDOW_MS)
 // ================================================================
-void autotune_run(float temp_cielo, uint32_t now_ms) {
+void autotune_run(float temp_pv, uint32_t now_ms) {
   if (!at_running) return;
 
-  // Aggiorna input libreria
-  at_input = (double)temp_cielo;
+  // Aggiorna input libreria (PV: Cielo in SINGLE, media in DUAL — calcolata in Task_PID)
+  at_input = (double)temp_pv;
 
   // Chiama libreria — restituisce 0 se ancora in corso, 1 se finita
   int result = at_tuner.Runtime();
@@ -135,11 +186,24 @@ void autotune_run(float temp_cielo, uint32_t now_ms) {
   }
 
   // Applica output relay con split configurata
-  int split_base  = g_state.autotune_split;
-  int split_cielo = 100 - split_base;
+  int split_base  = 50;
+  int split_cielo = 50;
+  if (MUTEX_TAKE_MS(10)) {
+    split_base  = g_state.autotune_split;
+    split_cielo = 100 - split_base;
+    xSemaphoreGive(g_mutex);
+  }
 
   double out_base  = at_output * split_base  / 100.0;
   double out_cielo = at_output * split_cielo / 100.0;
+
+  // Durante autotune il PID non comanda i relay: la UI mostrerebbe 0%.
+  // Pubbliciamo il duty richiesto dalla libreria (0–100% per zona) come pid_out_*.
+  if (MUTEX_TAKE_MS(10)) {
+    g_state.pid_out_base  = (float)out_base;
+    g_state.pid_out_cielo = (float)out_cielo;
+    xSemaphoreGive(g_mutex);
+  }
 
   // Time-proportional relay
   static uint32_t win_base  = 0;
@@ -150,14 +214,11 @@ void autotune_run(float temp_cielo, uint32_t now_ms) {
   bool rb = (now_ms - win_base  < (uint32_t)(out_base  / 100.0 * PID_WINDOW_MS));
   bool rc = (now_ms - win_cielo < (uint32_t)(out_cielo / 100.0 * PID_WINDOW_MS));
 
-  if (rb != g_state.relay_base)  {
-    g_state.relay_base  = rb;
-    digitalWrite(RELAY_BASE,  rb ? HIGH : LOW);
-  }
-  if (rc != g_state.relay_cielo) {
-    g_state.relay_cielo = rc;
-    digitalWrite(RELAY_CIELO, rc ? HIGH : LOW);
-  }
+  // Usa RELAY_WRITE (rispetta RELAY_*_INV), non digitalWrite grezzo
+  RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  rb);
+  RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, rc);
+  g_state.relay_base  = rb;
+  g_state.relay_cielo = rc;
 
   // Autotune terminato
   if (result != 0) {
@@ -178,13 +239,15 @@ void autotune_run(float temp_cielo, uint32_t now_ms) {
       g_state.autotune_kd     = kd;
       g_state.autotune_status = AutotuneStatus::DONE;
       g_state.nvs_dirty       = true;   // salva su flash
-      g_state.base_enabled    = false;  // spegni dopo autotune
-      g_state.cielo_enabled   = false;
+      g_state.base_enabled    = saved_base_enabled;
+      g_state.cielo_enabled   = saved_cielo_enabled;
+      g_state.relay_base      = false;
+      g_state.relay_cielo     = false;
       xSemaphoreGive(g_mutex);
     }
 
-    // Spegni relay
-    digitalWrite(RELAY_BASE,  LOW);
-    digitalWrite(RELAY_CIELO, LOW);
+    RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  false);
+    RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, false);
+    s_just_completed = true;
   }
 }

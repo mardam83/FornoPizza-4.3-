@@ -9,6 +9,10 @@
 #include "hardware.h"
 #include <Arduino.h>
 #include "autotune.h"
+#include "debug_config.h"
+#if SIMULATOR_MODE
+#include "simulator.h"
+#endif
 
 static void mark_dirty() { g_state.nvs_dirty = true; }
 
@@ -27,19 +31,23 @@ static void refresh_active() {
 //  CALLBACKS — setpoint
 // ================================================================
 void cb_base_minus(lv_event_t*) {
+  if (g_state.sensor_mode == SensorMode::SINGLE) return;
   g_state.set_base = fmax(50.0, g_state.set_base - 5.0);
   refresh_active();
 }
 void cb_base_plus(lv_event_t*) {
+  if (g_state.sensor_mode == SensorMode::SINGLE) return;
   g_state.set_base = fmin(500.0, g_state.set_base + 5.0);
   refresh_active();
 }
 void cb_cielo_minus(lv_event_t*) {
   g_state.set_cielo = fmax(50.0, g_state.set_cielo - 5.0);
+  if (g_state.sensor_mode == SensorMode::SINGLE) g_state.set_base = g_state.set_cielo;
   refresh_active();
 }
 void cb_cielo_plus(lv_event_t*) {
   g_state.set_cielo = fmin(500.0, g_state.set_cielo + 5.0);
+  if (g_state.sensor_mode == SensorMode::SINGLE) g_state.set_base = g_state.set_cielo;
   refresh_active();
 }
 
@@ -53,6 +61,10 @@ void cb_toggle_base(lv_event_t*) {
   } else {
     g_state.base_enabled = !g_state.base_enabled;
   }
+#if SIMULATOR_MODE
+  if (!g_state.base_enabled && !g_state.cielo_enabled)
+    simulator_user_turned_heat_off();
+#endif
   ui_refresh(&g_state);
   ui_refresh_temp(&g_state);
   ui_timer_auto_start();
@@ -64,6 +76,10 @@ void cb_toggle_cielo(lv_event_t*) {
   } else {
     g_state.cielo_enabled = !g_state.cielo_enabled;
   }
+#if SIMULATOR_MODE
+  if (!g_state.base_enabled && !g_state.cielo_enabled)
+    simulator_user_turned_heat_off();
+#endif
   ui_refresh(&g_state);
   ui_refresh_temp(&g_state);
   ui_timer_auto_start();
@@ -147,6 +163,7 @@ static void set_preset(int minutes) {
   }
   char buf[20]; snprintf(buf, sizeof(buf), "Ultimi %d min", minutes);
   lv_label_set_text(ui_GraphTimeLbl, buf);
+  ui_refresh_graph(&g_state);
 }
 void cb_preset_5 (lv_event_t*) { set_preset(5);  }
 void cb_preset_15(lv_event_t*) { set_preset(15); }
@@ -254,12 +271,7 @@ void cb_autotune_start(lv_event_t*) {
   if (g_state.safety_shutdown) return;
   if (autotune_is_running())   return;
 
-  // Imposta split di autotune in base alla parzializzazione corrente
-  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
-    g_state.autotune_split = g_state.pct_base;
-    MUTEX_GIVE();
-  }
-
+  autotune_apply_default_split();
   autotune_start();
 }
 

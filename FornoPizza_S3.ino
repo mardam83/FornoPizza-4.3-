@@ -1,38 +1,31 @@
 /**
  * ================================================================
  *  FORNO PIZZA CONTROLLER v17.0 — ESP32-S3
- *  Board  : ESP32-S3-WROOM-1-N16R8
- *  Display: 4.3" ST7701A 480×272 (SPI 4-wire)
- *  Touch  : CST820 capacitivo (I2C)
  *
- *  Per abilitare/disabilitare task, feature e log:
- *    → modificare debug_config.h
+ *  FIX rispetto all'originale:
+ *    [FIX-1] PID portato in AUTOMATIC quando base/cielo_enabled=true
+ *            Il PID era sempre in MANUAL → output=0 → relay OFF
+ *            → temperatura non saliva mai.
+ *            Soluzione: traccia lo stato precedente di enabled e chiama
+ *            pid->setEnabled(true/false) ad ogni cambio.
  *
- *  FIX v17 (da ESP32_CYD_LVGL_BugFix_Guide):
- *  ─────────────────────────────────────────
- *  [1] Oggetti hardware → puntatori (MAX6675, NVSStorage, PIDController)
- *  [2] Doppia init LVGL rimossa — display_init() gestisce tutto
- *  [3] TASK_LVGL_STACK: 8192 → 16384
- *  [4] MUTEX_TIMEOUT_MS: 10 → 50
- *  [5] Watchdog: vTaskDelay(2000) + g_pid_heartbeat=1 prima della creazione
- *  [6] g_pid_heartbeat++ PRIMA di readCelsius()
- *  [7] Splash: lv_scr_load_anim → lv_scr_load, LV_ANIM_OFF
- *  [8] lv_conf.h: LV_ATTRIBUTE_FAST_MEM vuoto, LV_MEM_POOL_* commentate,
- *                 LV_TXT_COLOR_CMD "#", LV_MEM_CUSTOM=1 PSRAM
+ *    [FIX-2] Campionamento grafico mancante.
+ *            g_graph.base/cielo non venivano mai scritti.
+ *            Aggiunto push ogni GRAPH_SAMPLE_S secondi in Task_PID.
  *
- *  MEMORIA:
- *  ────────
- *  Framebuffer LVGL:  double full FB 480×272 in PSRAM OPI (510 KB)
- *  Oggetti UI LVGL:   heap PSRAM via LV_MEM_CUSTOM=1
- *  GraphBuffer:       array base/cielo in PSRAM (~2.8 KB)
- *  WiFi/PID/WDG task: stack in SRAM interna (richiesto da ISR/WiFi)
- *  LVGL task:         stack in SRAM interna (16384 byte)
+ *  MODIFICHE SIMULATOR_MODE (marcate con [SIM]):
+ *    [SIM-A] Include simulator.h + macro no-op relay/MAX6675
+ *    [SIM-B] bool g_arc_snap = false  (richiesto da ui_animations.h)
+ *    [SIM-C] simulator_notify_shutdown() in emergency_shutdown()
+ *    [SIM-D] simulator_init() in setup()
+ *    [SIM-E] Forza SensorMode::SINGLE + setpoint default in setup()
+ *    [SIM-F] simulator_tick() + simulator_set_relay() in Task_PID
+ *    [SIM-G] simulator_test_tick() in Task_PID
  * ================================================================
  */
 
 #include <Arduino.h>
 #include <SPI.h>
-#include <max6675.h>
 #include <PID_v1.h>
 #include <lvgl.h>
 #include <freertos/FreeRTOS.h>
@@ -41,6 +34,23 @@
 
 // ── PRIMO include: tutte le #define di debug/task/log ───────────
 #include "debug_config.h"
+
+// ── [SIM-A]: mock hardware quando SIMULATOR_MODE=1 ──────────────
+#if SIMULATOR_MODE
+  #include "simulator.h"
+  extern uint32_t g_runaway_down_ms_override;
+  #define MAX6675 SimulatedMAX6675
+  #undef  RELAY_WRITE
+  #define RELAY_WRITE(pin, inv, state)  /* no-op simulator */
+  #undef  RELAY_ON
+  #define RELAY_ON(pin, inv)            /* no-op simulator */
+  #undef  RELAY_OFF
+  #define RELAY_OFF(pin, inv)           /* no-op simulator */
+  #undef  RELAY_INIT
+  #define RELAY_INIT(pin, inv)          /* no-op simulator */
+#else
+  #include <max6675.h>
+#endif
 
 // ── Display + LVGL ──────────────────────────────────────────────
 #include "display_driver.h"
@@ -62,16 +72,11 @@
 #endif
 
 // ================================================================
-//  PARAMETRI CONTROLLO RELAY (override da hardware.h se definiti)
+//  PARAMETRI CONTROLLO RELAY
 // ================================================================
-// Finestra di modulazione per i relay meccanici (ms)
-// Valore di default: 30000ms (30s) se non ridefinito in hardware.h
 #ifndef RELAY_WINDOW_MS
 #define RELAY_WINDOW_MS  30000UL
 #endif
-
-// Duty-cycle minimo (percento) al di sotto del quale il relay resta OFF
-// Valore di default: 5% se non ridefinito in hardware.h
 #ifndef RELAY_MIN_DUTY_PCT
 #define RELAY_MIN_DUTY_PCT  5
 #endif
@@ -103,6 +108,9 @@ volatile bool        g_emergency_shutdown = false;
 AppState    g_state = {};
 extern GraphBuffer g_graph;
 
+// ── [SIM-B]: richiesto da extern bool g_arc_snap in ui_animations.h
+bool g_arc_snap = false;
+
 // ================================================================
 //  EMERGENCY SHUTDOWN
 // ================================================================
@@ -118,12 +126,21 @@ void IRAM_ATTR emergency_shutdown(SafetyReason reason) {
   g_state.safety_shutdown = true;
   g_state.safety_reason   = reason;
 
+  // Porta PID in MANUAL
+  if (pid_base)  pid_base->setEnabled(false);
+  if (pid_cielo) pid_cielo->setEnabled(false);
+
   const char* reasons[] = {
     "NONE","TC_ERROR","OVERTEMP","RUNAWAY_DOWN","RUNAWAY_UP","WDG_TIMEOUT"
   };
   int idx = (int)reason;
   LOG_E(LOG_SAFETY, "!!! SHUTDOWN SICUREZZA: %s !!!\n",
         (idx >= 0 && idx <= 5) ? reasons[idx] : "?");
+
+  // ── [SIM-C]: notifica il simulatore per validazione test ──
+#if SIMULATOR_MODE
+  simulator_notify_shutdown((int)reason);
+#endif
 }
 
 // ================================================================
@@ -214,11 +231,29 @@ static void Task_Watchdog(void* param) {
 // ================================================================
 #if TASK_PID_ENABLE
 static void Task_PID(void* param) {
-  LOG_I(LOG_PID, "[Core %d] Task_PID avviato\n", xPortGetCoreID());
+  LOG_I(LOG_PID, "[Core %d] Task_PID avviato%s\n",
+        xPortGetCoreID(),
+        SIMULATOR_MODE ? " [SIMULATORE]" : "");
 
   unsigned long win_base  = 0;
   unsigned long win_cielo = 0;
-  uint32_t      last_nvs_ms = millis();
+  uint32_t      last_nvs_ms   = millis();
+  uint32_t      last_tick_ms  = millis();   // [SIM-F]
+  uint32_t      last_graph_ms = millis();   // [FIX-2] campionamento grafico
+
+  // [FIX-1]: traccia stato precedente per gestire transizioni ON/OFF
+  bool prev_base_enabled  = false;
+  bool prev_cielo_enabled = false;
+
+#if FEATURE_SAFETY
+  static uint32_t s_ru_ms       = 0;
+  static float    s_ru_t0       = 0.0f;
+  static float    s_rd_peak     = 0.0f;
+  static uint32_t s_rd_below_ms = 0;
+#if SIMULATOR_MODE
+  static uint32_t s_last_sim_reset_seq = 0;
+#endif
+#endif
 
   for (;;) {
     // FIX: heartbeat PRIMA di tutto
@@ -226,11 +261,24 @@ static void Task_PID(void* param) {
 
     uint32_t now = millis();
 
+    // ── [SIM-F]: aggiorna modello termico PRIMA di leggere sensori ──
+#if SIMULATOR_MODE
+    {
+      uint32_t dt_ms = now - last_tick_ms;
+      if (dt_ms == 0) dt_ms = PID_SAMPLE_MS;
+      last_tick_ms = now;
+      simulator_tick(dt_ms);
+    }
+#endif
+
     if (g_emergency_shutdown) {
       RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  false);
       RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, false);
-
-      // In emergenza la ventola resta accesa finché almeno un sensore attivo è sopra soglia
+#if SIMULATOR_MODE
+      simulator_set_relay(false, false);
+      // Avanza la sequenza test anche durante shutdown (altrimenti le fasi restano bloccate)
+      simulator_test_tick(now);
+#endif
       bool hot = (!g_state.tc_cielo_err && g_state.temp_cielo > FAN_OFF_TEMP);
       if (g_state.sensor_mode == SensorMode::DUAL &&
           !g_state.tc_base_err && g_state.temp_base > FAN_OFF_TEMP) {
@@ -300,13 +348,37 @@ static void Task_PID(void* param) {
     }
 #endif
 
+    // ── [FIX-1]: gestione transizioni ON/OFF del PID ──────────────
+    // Il PID deve essere in AUTOMATIC per calcolare l'output.
+    // Viene portato in AUTOMATIC quando enabled diventa true,
+    // in MANUAL quando diventa false o in emergenza.
+    if (g_state.base_enabled != prev_base_enabled) {
+      pid_base->setEnabled(g_state.base_enabled);
+      if (g_state.base_enabled) {
+        win_base = millis();   // resetta finestra relay
+        LOG_I(LOG_PID, "[PID] BASE: AUTOMATIC (setpoint=%.0f°C)\n", g_state.set_base);
+      } else {
+        LOG_I(LOG_PID, "[PID] BASE: MANUAL\n");
+      }
+      prev_base_enabled = g_state.base_enabled;
+    }
+    if (g_state.cielo_enabled != prev_cielo_enabled) {
+      pid_cielo->setEnabled(g_state.cielo_enabled);
+      if (g_state.cielo_enabled) {
+        win_cielo = millis();
+        LOG_I(LOG_PID, "[PID] CIELO: AUTOMATIC (setpoint=%.0f°C)\n", g_state.set_cielo);
+      } else {
+        LOG_I(LOG_PID, "[PID] CIELO: MANUAL\n");
+      }
+      prev_cielo_enabled = g_state.cielo_enabled;
+    }
+
     // ── PID + relay duty cycle ──
     bool base_on  = false;
     bool cielo_on = false;
 
     if (g_state.base_enabled) {
       pid_base->compute();
-      // Duty PID (0–100) scalato per parzializzazione BASE
       double duty_base = g_state.pid_out_base * (g_state.pct_base / 100.0);
       if (duty_base < 0.0)   duty_base = 0.0;
       if (duty_base > 100.0) duty_base = 100.0;
@@ -332,7 +404,6 @@ static void Task_PID(void* param) {
 
     if (g_state.cielo_enabled) {
       pid_cielo->compute();
-      // Duty PID (0–100) scalato per parzializzazione CIELO
       double duty_cielo = g_state.pid_out_cielo * (g_state.pct_cielo / 100.0);
       if (duty_cielo < 0.0)   duty_cielo = 0.0;
       if (duty_cielo > 100.0) duty_cielo = 100.0;
@@ -352,19 +423,48 @@ static void Task_PID(void* param) {
       cielo_on = (on_time > 0 && (millis() - win_cielo) < on_time);
     }
 
-    // Sonda non rilevata: disabilita accensione resistenze e spegni relay
+    // Sonda non rilevata: disabilita relay
     if (g_state.tc_base_err)  base_on  = false;
     if (g_state.tc_cielo_err) cielo_on = false;
 
+#if FEATURE_AUTOTUNE
+    if (!autotune_is_running()) {
+#endif
     RELAY_WRITE(RELAY_BASE,  RELAY_BASE_INV,  base_on);
     RELAY_WRITE(RELAY_CIELO, RELAY_CIELO_INV, cielo_on);
+#if FEATURE_AUTOTUNE
+    }
+#endif
+
+#if FEATURE_AUTOTUNE
+    if (autotune_is_running()) {
+      float pv_at = t_cielo_raw;
+      if (g_state.sensor_mode == SensorMode::DUAL) {
+        if (!err_base && !err_cielo) {
+          pv_at = (t_base_raw + t_cielo_raw) * 0.5f;
+        } else if (!err_cielo) {
+          pv_at = t_cielo_raw;
+        } else if (!err_base) {
+          pv_at = t_base_raw;
+        }
+      }
+      autotune_run(pv_at, now);
+    }
+#endif
 
     if (MUTEX_TAKE()) {
+#if FEATURE_AUTOTUNE
+      if (!autotune_is_running()) {
+        if (!autotune_consume_just_completed()) {
+          g_state.relay_base  = base_on;
+          g_state.relay_cielo = cielo_on;
+        }
+      }
+#else
       g_state.relay_base  = base_on;
       g_state.relay_cielo = cielo_on;
+#endif
 
-      // Ventola: ON se almeno una resistenza è attiva oppure se
-      // almeno un sensore attivo è sopra la soglia FAN_OFF_TEMP.
       bool res_on = g_state.relay_base || g_state.relay_cielo;
       bool hot = (!g_state.tc_cielo_err && g_state.temp_cielo > FAN_OFF_TEMP);
       if (g_state.sensor_mode == SensorMode::DUAL &&
@@ -379,11 +479,110 @@ static void Task_PID(void* param) {
       MUTEX_GIVE();
     }
 
+#if SIMULATOR_MODE
+    simulator_set_relay(g_state.relay_base, g_state.relay_cielo);
+#endif
+
+#if FEATURE_SAFETY
+    {
 #if FEATURE_AUTOTUNE
-    if (autotune_is_running()) {
-      autotune_run(t_cielo_raw, now);
+      const bool at_run = autotune_is_running();
+#else
+      const bool at_run = false;
+#endif
+#if SIMULATOR_MODE
+      if (g_sim.thermal_reset_seq != s_last_sim_reset_seq) {
+        s_last_sim_reset_seq = g_sim.thermal_reset_seq;
+        s_ru_ms       = 0;
+        s_ru_t0       = 0.0f;
+        s_rd_peak     = 0.0f;
+        s_rd_below_ms = 0;
+      }
+#endif
+      float tb, tc;
+      double sb, sc;
+      bool rb, rc, en_b, en_c;
+      if (MUTEX_TAKE()) {
+        tb   = (float)g_state.temp_base;
+        tc   = (float)g_state.temp_cielo;
+        sb   = g_state.set_base;
+        sc   = g_state.set_cielo;
+        rb   = g_state.relay_base;
+        rc   = g_state.relay_cielo;
+        en_b = g_state.base_enabled;
+        en_c = g_state.cielo_enabled;
+        MUTEX_GIVE();
+
+        bool res_on = rb || rc;
+        uint32_t rwd_ms = RUNAWAY_DOWN_MS;
+#if SIMULATOR_MODE
+        if (g_runaway_down_ms_override != 0) rwd_ms = g_runaway_down_ms_override;
+#endif
+#if RUNAWAY_UP_ENABLED
+        if (!at_run) {
+          float tmax = (tb > tc) ? tb : tc;
+          if (!res_on && !en_b && !en_c) {
+            if (s_ru_ms == 0) {
+              s_ru_ms = now;
+              s_ru_t0 = tmax;
+            } else if ((now - s_ru_ms) >= (uint32_t)RUNAWAY_RISE_MS) {
+              if (tmax - s_ru_t0 > RUNAWAY_RISE_DEG) {
+                emergency_shutdown(SafetyReason::RUNAWAY_UP);
+                continue;
+              }
+              s_ru_ms = now;
+              s_ru_t0 = tmax;
+            }
+          } else {
+            s_ru_ms = 0;
+          }
+        }
+#endif
+#if RUNAWAY_DOWN_ENABLED
+        if (!at_run) {
+          float tmax  = (tb > tc) ? tb : tc;
+          float spmax = (float)((sb > sc) ? sb : sc);
+          if (res_on && (en_b || en_c)) {
+            if (tmax > s_rd_peak) {
+              s_rd_peak     = tmax;
+              s_rd_below_ms = 0;
+            }
+            if (s_rd_peak >= spmax - 20.0f) {
+              if (s_rd_peak - tmax >= RUNAWAY_MIN_DROP) {
+                if (s_rd_below_ms == 0) s_rd_below_ms = now;
+                else if ((now - s_rd_below_ms) >= rwd_ms) {
+                  emergency_shutdown(SafetyReason::RUNAWAY_DOWN);
+                  continue;
+                }
+              } else {
+                s_rd_below_ms = 0;
+              }
+            }
+          } else {
+            s_rd_peak     = 0.0f;
+            s_rd_below_ms = 0;
+          }
+        }
+#endif
+      }
     }
 #endif
+
+    // ── [FIX-2]: campionamento grafico ogni GRAPH_SAMPLE_S secondi ──
+    // I puntatori base/cielo del GraphBuffer sono allocati in PSRAM da
+    // graph_alloc_psram() in setup(). Qui ci scriviamo i dati effettivi.
+    if (now - last_graph_ms >= (uint32_t)(GRAPH_SAMPLE_S * 1000UL)) {
+      last_graph_ms = now;
+      if (g_graph.base && g_graph.cielo) {
+        uint16_t idx = g_graph.head;
+        g_graph.base[idx]  = (float)g_state.temp_base;
+        g_graph.cielo[idx] = (float)g_state.temp_cielo;
+        g_graph.head = (idx + 1) % GRAPH_BUF_SIZE;
+        if (g_graph.count < GRAPH_BUF_SIZE) g_graph.count++;
+        LOG_D(LOG_PID, "[GRAPH] push idx=%d B=%.1f C=%.1f count=%d\n",
+              idx, g_state.temp_base, g_state.temp_cielo, g_graph.count);
+      }
+    }
 
     // ── NVS save periodico ──
     if (g_state.nvs_dirty && (now - last_nvs_ms > 5000)) {
@@ -400,6 +599,11 @@ static void Task_PID(void* param) {
       g_state.temp_cielo, g_state.set_cielo, g_state.pid_out_cielo,
       g_state.relay_cielo ? '*' : '.');
 
+    // ── [SIM-G]: avanza macchina a stati del test ──
+#if SIMULATOR_MODE
+    simulator_test_tick(now);
+#endif
+
     vTaskDelay(pdMS_TO_TICKS(PID_SAMPLE_MS));
   }
 }
@@ -412,19 +616,16 @@ static void Task_PID(void* param) {
 static void Task_LVGL(void* param) {
   LOG_I(LOG_LVGL, "[Core %d] Task_LVGL avviato\n", xPortGetCoreID());
   uint32_t last_ui_ms = 0;
- 
+
   for (;;) {
     lv_tick_inc(1);
     lv_timer_handler();
- 
+
     uint32_t now = millis();
     if (now - last_ui_ms >= 100) {
       last_ui_ms = now;
- 
+
 #if TASK_WIFI_ENABLE
-      // ── FIX v23: consuma flag scritti da Task_WiFi ──────────────
-      // IMPORTANTE: queste chiamate sono sicure perché siamo nel
-      // thread Task_LVGL — l'unico che può toccare oggetti LVGL.
       if (g_wifi_scan_done) {
         g_wifi_scan_done = false;
         ui_wifi_update_list();
@@ -434,12 +635,12 @@ static void Task_LVGL(void* param) {
         ui_wifi_update_status();
       }
 #endif
- 
+
       Screen scr;
       if (MUTEX_TAKE()) {
         scr = g_state.active_screen;
         MUTEX_GIVE();
- 
+
         switch (scr) {
           case Screen::MAIN:
             if (ui_ScreenMain && lv_scr_act() == ui_ScreenMain)
@@ -461,13 +662,7 @@ static void Task_LVGL(void* param) {
               ui_refresh_graph(&g_state);
             break;
 #if TASK_WIFI_ENABLE
-          // FIX v23: rimosso ui_wifi_update_list/status da qui —
-          // vengono gestiti dai flag sopra, non ogni 100ms su ogni screen.
-          // Manteniamo solo ui_ota_update_progress che è sicuro
-          // (viene chiamato da Task_LVGL, e OTA non chiama UI direttamente).
           case Screen::WIFI_SCAN:
-            // nessuna azione — la lista si aggiorna via g_wifi_scan_done
-            // lo status si aggiorna via g_wifi_status_changed
             break;
           case Screen::MQTT:
             break;
@@ -493,11 +688,6 @@ static void Task_LVGL(void* param) {
 void setup() {
   Serial.begin(115200);
 
-
-  // Attendi che il monitor seriale USB CDC sia pronto (fino a 3s).
-  // Su N4R8 con USB CDC il buffer non è disponibile immediatamente
-  // dopo il reset — senza questo delay display_init() stampa nel vuoto.
-  // Con UART0 hardware (non USB) ridurre a delay(100).
   {
     uint32_t t0 = millis();
     while (!Serial && (millis() - t0 < 3000)) { delay(10); }
@@ -507,6 +697,9 @@ void setup() {
   Serial.flush();
 
   LOG_I(LOG_SYSTEM, "\n=== FORNO PIZZA v17.0 — ESP32-S3 | NV3041A 480x272 ===\n");
+#if SIMULATOR_MODE
+  LOG_I(LOG_SYSTEM, "*** SIMULATOR MODE ATTIVO — nessun hardware reale richiesto ***\n");
+#endif
   LOG_I(LOG_SYSTEM, "Task: PID=%d WDG=%d LVGL=%d WiFi=%d\n",
         TASK_PID_ENABLE, TASK_WDG_ENABLE, TASK_LVGL_ENABLE, TASK_WIFI_ENABLE);
   LOG_I(LOG_SYSTEM, "Feature: Splash=%d Safety=%d Autotune=%d OTA=%d\n",
@@ -549,12 +742,26 @@ void setup() {
   tc_cielo = new MAX6675(TC_SCK, TC_CS_CIELO, TC_MISO);
   nvs      = new NVSStorage();
   LOG_I(LOG_SYSTEM, "[SETUP] MAX6675 + NVS allocati\n");
+
+  // ── [SIM-D]: inizializza simulatore ──
+#if SIMULATOR_MODE
+  simulator_init();
+#endif
+
 #if FEATURE_SPLASH
-  splash_set_progress(20, "Sensori OK");
+  splash_set_progress(20, SIMULATOR_MODE ? "Simulatore OK" : "Sensori OK");
 #endif
 
   // ---- 7. NVS ----
   nvs_load_to_state();
+
+  // ── [SIM-E]: forza SINGLE mode e setpoint valido per il test ──
+#if SIMULATOR_MODE
+  g_state.sensor_mode = SensorMode::SINGLE;
+  if (g_state.set_base  < 100.0 || g_state.set_base  > 450.0) g_state.set_base  = 250.0;
+  if (g_state.set_cielo < 100.0 || g_state.set_cielo > 450.0) g_state.set_cielo = 250.0;
+#endif
+
   LOG_I(LOG_SYSTEM, "[SETUP] NVS: mode=%s set=%.0f/%.0f split=%d/%d\n",
     g_state.sensor_mode == SensorMode::SINGLE ? "SINGLE" : "DUAL",
     g_state.set_base, g_state.set_cielo,
@@ -572,7 +779,9 @@ void setup() {
                                  g_state.kp_cielo, g_state.ki_cielo, g_state.kd_cielo);
   pid_base->begin();
   pid_cielo->begin();
-  LOG_I(LOG_SYSTEM, "[SETUP] PID OK (Kp=%.2f Ki=%.3f Kd=%.2f)\n",
+  // Nota: i PID partono in MANUAL. Vengono portati in AUTOMATIC
+  // da Task_PID quando base_enabled/cielo_enabled diventano true.
+  LOG_I(LOG_SYSTEM, "[SETUP] PID OK (Kp=%.2f Ki=%.3f Kd=%.2f) — modo MANUAL\n",
         g_state.kp_base, g_state.ki_base, g_state.kd_base);
 #if FEATURE_SPLASH
   splash_set_progress(40, "PID OK");
@@ -591,10 +800,11 @@ void setup() {
     g_state.tc_base_err = isnan(t1) || t1 <= 0.0f;
     if (!g_state.tc_base_err) g_state.temp_base = (double)t1;
   }
-  LOG_I(LOG_SYSTEM, "[SETUP] Temp: B=%.1f°C  C=%.1f°C\n",
-        g_state.temp_base, g_state.temp_cielo);
+  LOG_I(LOG_SYSTEM, "[SETUP] Temp: B=%.1f°C  C=%.1f°C%s\n",
+        g_state.temp_base, g_state.temp_cielo,
+        SIMULATOR_MODE ? " (simulata)" : "");
 #if FEATURE_SPLASH
-  splash_set_progress(55, "Sensori OK");
+  splash_set_progress(55, SIMULATOR_MODE ? "Temp simulata OK" : "Sensori OK");
 #endif
 
   // ---- 10. UI ----

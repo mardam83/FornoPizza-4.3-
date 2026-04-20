@@ -1,9 +1,8 @@
 /**
  * ui_wifi.cpp — Forno Pizza v23-S3
- * FIX LAYOUT: tastiera LVGL posizionata con LV_ALIGN_BOTTOM_MID
- * La tastiera occupa la sua altezza naturale (~160px) ancorata in basso.
- * Tutto il resto (header, label, textarea) sta sopra in 32+50=82px.
- * Nessun bottone separato per CONNETTI/ANNULLA — usa OK/Cancel della tastiera.
+ * MQTT: schermo 480×272 — la tastiera TEXT default (~160px) copriva i campi.
+ * Area form sopra tastiera con altezza fissa + contenitore scrollabile; tastiera
+ * con altezza esplicita ancorata in basso (nessuna sovrapposizione).
  */
 
 #include "ui_wifi.h"
@@ -55,6 +54,7 @@ lv_obj_t* ui_MqttKbd      = NULL;   // tastierino inserimento
 lv_obj_t* ui_BtnMqttToWifi = NULL;
 lv_obj_t* ui_BtnMqttToMain = NULL;
 lv_obj_t* ui_MqttBtnLbl   = NULL;   // label del pulsante MQTT in header WiFi
+static lv_obj_t* s_mqtt_form = NULL; // contenitore scroll campi MQTT
 
 #define MQTT_NVS_NAMESPACE "mqtt"
 #define MQTT_DEFAULT_PORT  "1883"
@@ -102,6 +102,7 @@ static void cb_goto_mqtt(lv_event_t* e);
 static void cb_mqtt_to_wifi(lv_event_t* e);
 static void cb_mqtt_to_main(lv_event_t* e);
 static void cb_mqtt_ta_focused(lv_event_t* e);
+static void cb_mqtt_kbd(lv_event_t* e);
 
 // ================================================================
 //  HELPERS
@@ -432,8 +433,9 @@ void ui_build_ota(void) {
 }
 
 // ================================================================
-//  BUILD — MQTT (broker: IP, porta, user, password)
-//  Layout: header + griglia 2 righe x 2 colonne (campi dimezzati) + spazio tastierino + barra nav
+//  BUILD — MQTT (broker)
+//  Schermo 480×272: header 32px | form scrollabile (120px) | tastiera 120px fissa in basso.
+//  Riga 1: host (ampio) + porta | Riga 2: utente + password. Nessun overlap tastiera/campi.
 // ================================================================
 static void mqtt_nvs_load(char* host, size_t host_sz, char* port, size_t port_sz,
                           char* user, size_t user_sz, char* pass, size_t pass_sz) {
@@ -462,23 +464,43 @@ static void mqtt_nvs_save(const char* host, const char* port, const char* user, 
     prefs.end();
 }
 
+// OK / Hide sulla tastiera: toglie focus e nasconde tastiera (stesso schema OTA)
+static void cb_mqtt_kbd(lv_event_t* e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_READY && code != LV_EVENT_CANCEL) return;
+    if (ui_MqttHostTA) lv_obj_clear_state(ui_MqttHostTA, LV_STATE_FOCUSED);
+    if (ui_MqttPortTA) lv_obj_clear_state(ui_MqttPortTA, LV_STATE_FOCUSED);
+    if (ui_MqttUserTA) lv_obj_clear_state(ui_MqttUserTA, LV_STATE_FOCUSED);
+    if (ui_MqttPassTA) lv_obj_clear_state(ui_MqttPassTA, LV_STATE_FOCUSED);
+    if (ui_MqttKbd) lv_obj_add_flag(ui_MqttKbd, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void cb_mqtt_ta_focused(lv_event_t* e) {
     lv_obj_t* ta = lv_event_get_target(e);
     if (ui_MqttKbd && ta) {
         lv_keyboard_set_textarea(ui_MqttKbd, ta);
         lv_obj_clear_flag(ui_MqttKbd, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(ui_MqttKbd);
+        lv_obj_scroll_to_view(ta, LV_ANIM_ON);
     }
 }
 
 void ui_build_mqtt(void) {
     lv_color_t COL_MQTT = lv_color_make(0x00, 0x99, 0x55);
-    const int CW = 230;  // larghezza colonna (2 colonne: 4 + 230 + 8 + 230 + 8 = 480)
-    const int MARGIN = 4;
+    // 480×272: riserva esplicita in basso per la tastiera (evita overlap con i campi)
+    const int DISP_H = 272;
+    const int HDR_H  = 32;
+    const int KBD_H  = 120;
+    const int FORM_H = DISP_H - HDR_H - KBD_H;
+
     const int GAP = 8;
-    const int ROW1_Y = 36;
-    const int ROW2_Y = 92;
-    const int LABEL_H = 14;
-    const int TA_H = 28;
+    const int W_PORT = 100;
+    const int INNER_W = 480 - 8;   // pad orizzontale 4+4 sul form
+    const int W_HOST = INNER_W - GAP - W_PORT;
+    const int LABEL_H = 11;
+    const int TA_H = 26;
+    const int ROW_GAP = 6;
+    const int W_HALF = (INNER_W - GAP) / 2;
 
     ui_ScreenMqtt = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(ui_ScreenMqtt, COL_DARK, 0);
@@ -486,7 +508,7 @@ void ui_build_mqtt(void) {
     lv_obj_clear_flag(ui_ScreenMqtt, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* hdr = lv_obj_create(ui_ScreenMqtt);
-    lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, 32);
+    lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, HDR_H);
     lv_obj_set_style_bg_color(hdr, COL_MQTT, 0);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(hdr, 0, 0);
@@ -505,19 +527,32 @@ void ui_build_mqtt(void) {
     lv_obj_set_style_text_color(hdr_lbl, lv_color_white(), 0);
     lv_obj_align(hdr_lbl, LV_ALIGN_CENTER, 0, 0);
 
-    auto add_cell = [&](int x, int y, const char* label_txt, lv_obj_t** ta_out, int max_len, bool password) {
-        lv_obj_t* lbl = lv_label_create(ui_ScreenMqtt);
+    s_mqtt_form = lv_obj_create(ui_ScreenMqtt);
+    lv_obj_set_pos(s_mqtt_form, 0, HDR_H);
+    lv_obj_set_size(s_mqtt_form, 480, FORM_H);
+    lv_obj_set_style_bg_color(s_mqtt_form, COL_DARK, 0);
+    lv_obj_set_style_bg_opa(s_mqtt_form, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_mqtt_form, 0, 0);
+    lv_obj_set_style_pad_all(s_mqtt_form, 4, 0);
+    lv_obj_add_flag(s_mqtt_form, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(s_mqtt_form, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scroll_dir(s_mqtt_form, LV_DIR_VER);
+
+    auto add_cell = [&](int x, int y, const char* label_txt, lv_obj_t** ta_out,
+                        int max_len, bool password, int cell_w) {
+        lv_obj_t* lbl = lv_label_create(s_mqtt_form);
         lv_label_set_text(lbl, label_txt);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(lbl, COL_GRAY, 0);
         lv_obj_set_pos(lbl, x, y);
-        lv_obj_t* ta = lv_textarea_create(ui_ScreenMqtt);
+        lv_obj_t* ta = lv_textarea_create(s_mqtt_form);
         lv_obj_set_pos(ta, x, y + LABEL_H + 2);
-        lv_obj_set_size(ta, CW, TA_H);
+        lv_obj_set_size(ta, cell_w, TA_H);
         lv_textarea_set_max_length(ta, max_len);
         lv_textarea_set_one_line(ta, true);
         lv_textarea_set_password_mode(ta, password);
         lv_obj_set_style_bg_color(ta, COL_DGRAY, 0);
+        lv_obj_set_style_text_font(ta, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(ta, COL_WHITE, 0);
         lv_obj_set_style_border_color(ta, COL_MQTT, 0);
         lv_obj_set_style_border_width(ta, 2, 0);
@@ -525,23 +560,29 @@ void ui_build_mqtt(void) {
         *ta_out = ta;
     };
 
-    int x1 = MARGIN;
-    int x2 = MARGIN + CW + GAP;
-    add_cell(x1, ROW1_Y, "IP / Host:", &ui_MqttHostTA, 64, false);
-    add_cell(x2, ROW1_Y, "Porta:", &ui_MqttPortTA, 6, false);
+    int x1 = 0;
+    int x2 = W_HOST + GAP;
+    int y0 = 0;
+    add_cell(x1, y0, "Broker (IP o hostname)", &ui_MqttHostTA, 64, false, W_HOST);
+    add_cell(x2, y0, "Porta", &ui_MqttPortTA, 6, false, W_PORT);
     if (ui_MqttPortTA) lv_textarea_set_placeholder_text(ui_MqttPortTA, "1883");
-    add_cell(x1, ROW2_Y, "Username:", &ui_MqttUserTA, 32, false);
-    add_cell(x2, ROW2_Y, "Password:", &ui_MqttPassTA, 32, true);
 
-    // Tastierino in basso — più spazio recuperato (nessuna barra nav sotto)
+    int y1 = y0 + LABEL_H + 2 + TA_H + ROW_GAP;
+    add_cell(x1, y1, "Utente (opz.)", &ui_MqttUserTA, 32, false, W_HALF);
+    add_cell(x1 + W_HALF + GAP, y1, "Password", &ui_MqttPassTA, 32, true, W_HALF);
+
     ui_MqttKbd = lv_keyboard_create(ui_ScreenMqtt);
-    lv_obj_set_width(ui_MqttKbd, 480);
+    lv_obj_set_size(ui_MqttKbd, 480, KBD_H);
     lv_obj_align(ui_MqttKbd, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_keyboard_set_mode(ui_MqttKbd, LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_keyboard_set_textarea(ui_MqttKbd, ui_MqttHostTA);
     lv_obj_set_style_bg_color(ui_MqttKbd, lv_color_make(0x1A,0x1A,0x2A), 0);
     lv_obj_set_style_bg_opa(ui_MqttKbd, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_font(ui_MqttKbd, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ui_MqttKbd, COL_WHITE, 0);
+    lv_obj_set_style_pad_all(ui_MqttKbd, 2, 0);
+    lv_obj_add_event_cb(ui_MqttKbd, cb_mqtt_kbd, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(ui_MqttKbd, cb_mqtt_kbd, LV_EVENT_CANCEL, NULL);
     lv_obj_add_flag(ui_MqttKbd, LV_OBJ_FLAG_HIDDEN);
 }
 

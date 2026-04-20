@@ -38,7 +38,7 @@ int PID_ATune::Runtime()
 	}
 	unsigned long now = millis();
 	
-	if((now-lastTime)<sampleTime) return false;
+	if((now-lastTime)<sampleTime) return 0;
 	lastTime = now;
 	double refVal = *input;
 	justevaled=true;
