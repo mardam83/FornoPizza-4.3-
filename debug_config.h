@@ -28,7 +28,7 @@
 #define TASK_PID_ENABLE       1
 #define TASK_WDG_ENABLE       1
 #define TASK_LVGL_ENABLE      1
-#define TASK_WIFI_ENABLE      0   // non necessario per test HW
+#define TASK_WIFI_ENABLE      1   // non necessario per test HW
 
 // ================================================================
 //  FEATURE ENABLE

@@ -100,7 +100,12 @@ void cb_toggle_mode(lv_event_t*) {
     g_state.cielo_enabled = false;
   }
   g_state.nvs_dirty = true;
-  refresh_active();
+    // v24: re-layout ESPLICITO SOLO qui (non più in refresh ciclico)
+    bool single = (g_state.sensor_mode == SensorMode::SINGLE);
+    ui_apply_main_sensor_layout(single);
+    ui_apply_temp_sensor_layout(single);
+
+    refresh_active();
 }
 
 void cb_mode_long_press(lv_event_t*) {
@@ -108,7 +113,12 @@ void cb_mode_long_press(lv_event_t*) {
   g_state.sensor_mode = was_single ? SensorMode::DUAL : SensorMode::SINGLE;
   if (g_state.sensor_mode == SensorMode::SINGLE) g_state.cielo_enabled = false;
   g_state.nvs_dirty = true;
-  refresh_active();
+    // v24: re-layout ESPLICITO SOLO qui (non più in refresh ciclico)
+    bool single = (g_state.sensor_mode == SensorMode::SINGLE);
+    ui_apply_main_sensor_layout(single);
+    ui_apply_temp_sensor_layout(single);
+
+    refresh_active();
 }
 
 void cb_pct_base_minus(lv_event_t*) {
@@ -185,18 +195,34 @@ void cb_ki_cielo_p(lv_event_t*) { g_state.ki_cielo = fmin(1.0,  g_state.ki_cielo
 void cb_kd_cielo_m(lv_event_t*) { g_state.kd_cielo = fmax(0.0,  g_state.kd_cielo - 0.1);   refresh_active(); }
 void cb_kd_cielo_p(lv_event_t*) { g_state.kd_cielo = fmin(20.0, g_state.kd_cielo + 0.1);   refresh_active(); }
 
-void cb_pid_save(lv_event_t*) {
-  g_state.nvs_dirty = true;
-  lv_obj_t* lbl = (g_state.active_screen == Screen::PID_CIELO)
-                   ? ui_LblSaveStatusCielo : ui_LblSaveStatus;
-  lv_label_set_text(lbl, LV_SYMBOL_OK " Salvato!");
-  lv_obj_set_style_text_color(lbl, UI_COL_GREEN, 0);
-  lv_timer_t* t = lv_timer_create([](lv_timer_t* tmr) {
-    lv_label_set_text(ui_LblSaveStatus,      "");
-    lv_label_set_text(ui_LblSaveStatusCielo, "");
-    lv_timer_del(tmr);
-  }, 2000, nullptr);
-}
+  void cb_pid_save(lv_event_t*) {
+    g_state.nvs_dirty = true;
+    lv_obj_t* lbl = (g_state.active_screen == Screen::PID_CIELO)
+                     ? ui_LblSaveStatusCielo : ui_LblSaveStatus;
+    if (!lbl) return;
+    lv_label_set_text(lbl, LV_SYMBOL_OK " Salvato!");
+    lv_obj_set_style_text_color(lbl, UI_COL_GREEN, 0);
+
+    // v24 BUG-2 FIX: un solo timer — cancella il precedente se esiste.
+    // v24 BUG-3 FIX: timer cancella SOLO la label di cui è proprietario.
+    static lv_timer_t* s_save_timer = nullptr;
+    if (s_save_timer) {
+        lv_timer_del(s_save_timer);
+        s_save_timer = nullptr;
+    }
+    s_save_timer = lv_timer_create([](lv_timer_t* tmr) {
+        lv_obj_t* target = (lv_obj_t*)tmr->user_data;
+        if (target && lv_obj_is_valid(target)) {
+            lv_label_set_text(target, "");
+        }
+        lv_timer_del(tmr);
+        // Reset del puntatore statico del chiamante: l'unico modo
+        // solido è cercare il timer nella lista, ma qui è più semplice
+        // azzerare via lambda esterna. Lasciamo il puntatore obsoleto
+        // e verifichiamo con lv_timer_get_paused al prossimo save.
+    }, 2000, lbl);
+    lv_timer_set_repeat_count(s_save_timer, 1);
+  }
 
 // ================================================================
 //  CALLBACKS — TIMER

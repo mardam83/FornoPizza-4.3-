@@ -44,23 +44,26 @@
 #define SIM_AUTOSTART_MS      8000
 
 // Finestra RUNAWAY_DOWN nel solo test simulatore (ms reali; 0 = usa firmware default)
-#define SIM_RUNAWAY_DOWN_MS_TEST  20000UL
+#define SIM_RUNAWAY_DOWN_MS_TEST  50000UL
 
 // ================================================================
 //  FASI TEST
 // ================================================================
-enum class SimTestPhase {
-    WAIT_START   = 0,
-    PID_WARMUP   = 1,
-    OVERTEMP     = 2,
-    TC_ERROR     = 3,
-    RUNAWAY_UP   = 4,
-    RUNAWAY_DOWN = 5,
-    AUTOTUNE     = 6,
-    FINAL_WARMUP = 7,
-    REPORT       = 8,
-    DONE         = 9
-};
+  enum class SimTestPhase {
+      WAIT_START      = 0,
+      PID_WARMUP      = 1,
+      OVERTEMP        = 2,
+      TC_ERROR        = 3,
+      RUNAWAY_UP      = 4,
+      RUNAWAY_DOWN    = 5,
+      AUTOTUNE        = 6,
+      FINAL_WARMUP    = 7,
+      // v24 nuove fasi prima del report
+      UI_MODE_TOGGLE  = 8,   // toggle SINGLE↔DUAL e verifica layout
+      UI_SETPOINT_SPAM= 9,   // 20 cambi SP/s → stress arc anim
+      REPORT          = 10,
+      DONE            = 11
+  };
 
 // ================================================================
 //  STATO SIMULATORE
@@ -105,6 +108,14 @@ struct SimulatorState {
     float   autotune_ki_result;
     float   autotune_kd_result;
     float   pid_settle_time_s;
+      // v24: metriche più fini sul PID
+      float   pid_overshoot_c;       // max overshoot ° sopra setpoint
+      float   pid_steady_err_c;      // errore medio a regime
+      uint32_t pid_settled_at_ms;    // quando entra nella banda ±3°
+
+      // v24: metriche UI
+      bool    test_ui_mode_toggle_ok;
+      bool    test_ui_setpoint_spam_ok;
     int     tests_passed;
     int     tests_total;
 };

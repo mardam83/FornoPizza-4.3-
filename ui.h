@@ -269,6 +269,12 @@ inline lv_color_t ui_temp_color(double t, double sp) {
 // ================================================================
 void ui_init();
 void ui_show_screen(Screen s);
+  // v24: re-layout esposti per essere chiamati SOLO sui cambi modalità
+  void ui_apply_main_sensor_layout(bool single);
+  void ui_apply_temp_sensor_layout(bool single);
+// v24: re-layout esposti per essere chiamati SOLO sui cambi modalità
+void ui_apply_main_sensor_layout(bool single);
+void ui_apply_temp_sensor_layout(bool single);
 void ui_refresh(AppState* s);
 void ui_refresh_temp(AppState* s);
 void ui_refresh_pid(AppState* s);
