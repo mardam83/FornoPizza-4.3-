@@ -84,14 +84,12 @@ lv_obj_t* ui_BtnPreset30  = NULL;
 int       g_graph_minutes  = 15;
 
 // ── Grafico canvas (sostituisce lv_chart) ────────────────────
-#define GCVS_W  420
-#define GCVS_H  160
-#define GCVS_X   58
-#define GCVS_Y   34
+#define GCVS_W  420   // larghezza area dati canvas
+#define GCVS_H  160   // altezza area dati canvas
+#define GCVS_X   58   // x canvas sullo schermo (spazio scala Y)
+#define GCVS_Y   34   // y canvas sullo schermo (sotto header)
 static lv_obj_t*  s_canvas      = NULL;
-// v24: buffer canvas spostato in PSRAM (~131 KB liberati da SRAM).
-// Accesso raro (solo su refresh_graph, ~1 Hz) → PSRAM latency OK.
-static lv_color_t* s_cbuf        = nullptr;
+static lv_color_t s_cbuf[GCVS_W * GCVS_H];  // buffer canvas in SRAM
 static int        s_graph_y_min = 0;
 static int        s_graph_y_max = 450;
 // Label scala Y (5 label statiche, aggiornate da refresh)
@@ -128,8 +126,7 @@ static lv_obj_t* s_TempLblTitleCielo = nullptr;
 // ================================================================
 //  Layout MAIN/CTRL in base a SensorMode
 // ================================================================
-  // v24: rimossa static — richiamabile da ui_events.cpp
-  void ui_apply_main_sensor_layout(bool single) {
+static void ui_apply_main_sensor_layout(bool single) {
     if (!ui_PanelMainBase || !ui_PanelMainCielo) return;
 
     if (single) {
@@ -208,8 +205,7 @@ static lv_obj_t* s_TempLblTitleCielo = nullptr;
     }
 }
 
-  // v24: rimossa static — richiamabile da ui_events.cpp
-  void ui_apply_temp_sensor_layout(bool single) {
+static void ui_apply_temp_sensor_layout(bool single) {
     if (!ui_PanelBase || !ui_PanelCielo) return;
 
     if (single) {
@@ -1234,20 +1230,6 @@ static void build_graph() {
     // ── Canvas dati ───────────────────────────────────────────────
     s_canvas = lv_canvas_create(ui_ScreenGraph);
     lv_obj_set_pos(s_canvas, GCVS_X, GCVS_Y);
-    // v24: alloca buffer canvas in PSRAM (una sola volta)
-    if (!s_cbuf) {
-        const size_t bytes = (size_t)GCVS_W * GCVS_H * sizeof(lv_color_t);
-        s_cbuf = (lv_color_t*)heap_caps_malloc(bytes,
-                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!s_cbuf) {
-            Serial.println("[GRAPH] WARN: PSRAM KO → fallback SRAM canvas");
-            static lv_color_t fallback[GCVS_W * GCVS_H];
-            s_cbuf = fallback;
-        } else {
-            Serial.printf("[GRAPH] Canvas buffer PSRAM %u KB\n",
-                            (unsigned)(bytes / 1024));
-        }
-    }
     lv_canvas_set_buffer(s_canvas, s_cbuf, GCVS_W, GCVS_H, LV_IMG_CF_TRUE_COLOR);
     lv_canvas_fill_bg(s_canvas, GBG, LV_OPA_COVER);
 
@@ -1437,18 +1419,6 @@ void ui_init(void) {
     build_graph();
     build_timer();
     build_ricette();
-	  if (ui_BtnPctBaseMinus)  lv_obj_add_event_cb(ui_BtnPctBaseMinus,
-        cb_anim_bounce, LV_EVENT_PRESSED, NULL);
-  if (ui_BtnPctBasePlus)   lv_obj_add_event_cb(ui_BtnPctBasePlus,
-        cb_anim_bounce, LV_EVENT_PRESSED, NULL);
-  if (ui_BtnPctCieloMinus) lv_obj_add_event_cb(ui_BtnPctCieloMinus,
-        cb_anim_bounce, LV_EVENT_PRESSED, NULL);
-  if (ui_BtnPctCieloPlus)  lv_obj_add_event_cb(ui_BtnPctCieloPlus,
-        cb_anim_bounce, LV_EVENT_PRESSED, NULL);
-  if (ui_BtnSplitMinus)    lv_obj_add_event_cb(ui_BtnSplitMinus,
-        cb_anim_bounce, LV_EVENT_PRESSED, NULL);
-  if (ui_BtnSplitPlus)     lv_obj_add_event_cb(ui_BtnSplitPlus,
-        cb_anim_bounce, LV_EVENT_PRESSED, NULL);
     ui_build_wifi();
     ui_build_ota();
     ui_build_wifi_pwd();
@@ -1492,85 +1462,49 @@ void ui_show_screen(Screen s) {
 void ui_refresh(AppState* s) {
     if (!s) return;
 
-    // v24: layout NON viene riapplicato qui.
-    // Il layout cambia solo in cb_toggle_mode/cb_mode_long_press.
-    // Se la modalità è cambiata "alle spalle" (MQTT, NVS load, safety),
-    // quel codice deve chiamare esplicitamente:
-    //   ui_apply_main_sensor_layout_public()
-    //   ui_apply_temp_sensor_layout_public()
+    ui_apply_main_sensor_layout(s->sensor_mode == SensorMode::SINGLE);
 
     // Temperatura BASE
-      static int s_prev_tb = -9999;
-      static bool s_prev_tb_err = false;
-      if (s->tc_base_err) {
-          if (!s_prev_tb_err) {
-              lv_label_set_text(ui_LabelTempBase, "ERR");
-              lv_obj_set_style_text_color(ui_LabelTempBase, UI_COL_ERR, 0);
-              lv_label_set_text(ui_LabelErrBase, "TC ERR");
-              s_prev_tb_err = true;
-              s_prev_tb = -9999;
-          }
-      } else {
-          int tb = (int)s->temp_base;
-          if (tb != s_prev_tb || s_prev_tb_err) {
-              char buf[16];
-              snprintf(buf, sizeof(buf), "%d", tb);
-              lv_label_set_text(ui_LabelTempBase, buf);
-              lv_obj_set_style_text_color(ui_LabelTempBase,
-                  ui_temp_color(s->temp_base, s->set_base), 0);
-              if (s_prev_tb_err) lv_label_set_text(ui_LabelErrBase, "");
-              s_prev_tb = tb;
-              s_prev_tb_err = false;
-          }
-      }
+    if (s->tc_base_err) {
+        lv_label_set_text(ui_LabelTempBase, "ERR");
+        lv_obj_set_style_text_color(ui_LabelTempBase, UI_COL_ERR, 0);
+        lv_label_set_text(ui_LabelErrBase, "TC ERR");
+    } else {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.0f", s->temp_base);
+        lv_label_set_text(ui_LabelTempBase, buf);
+        lv_obj_set_style_text_color(ui_LabelTempBase,
+            ui_temp_color(s->temp_base, s->set_base), 0);
+        lv_label_set_text(ui_LabelErrBase, "");
+    }
 
     // Temperatura CIELO
-      static int s_prev_tc = -9999;
-      static bool s_prev_tc_err = false;
-      if (s->tc_base_err) {
-          if (!s_prev_tc_err) {
-              lv_label_set_text(ui_LabelTempBase, "ERR");
-              lv_obj_set_style_text_color(ui_LabelTempBase, UI_COL_ERR, 0);
-              lv_label_set_text(ui_LabelErrBase, "TC ERR");
-              s_prev_tc_err = true;
-              s_prev_tc = -9999;
-          }
-      } else {
-          int tb = (int)s->temp_base;
-          if (tb != s_prev_tc || s_prev_tc_err) {
-              char buf[16];
-              snprintf(buf, sizeof(buf), "%d", tb);
-              lv_label_set_text(ui_LabelTempBase, buf);
-              lv_obj_set_style_text_color(ui_LabelTempBase,
-                  ui_temp_color(s->temp_base, s->set_base), 0);
-              if (s_prev_tc_err) lv_label_set_text(ui_LabelErrBase, "");
-              s_prev_tc = tb;
-              s_prev_tc_err = false;
-          }
-      }
+    if (s->tc_cielo_err) {
+        lv_label_set_text(ui_LabelTempCielo, "ERR");
+        lv_obj_set_style_text_color(ui_LabelTempCielo, UI_COL_ERR, 0);
+        lv_label_set_text(ui_LabelErrCielo, "TC ERR");
+    } else {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.0f", s->temp_cielo);
+        lv_label_set_text(ui_LabelTempCielo, buf);
+        lv_obj_set_style_text_color(ui_LabelTempCielo,
+            ui_temp_color(s->temp_cielo, s->set_cielo), 0);
+        lv_label_set_text(ui_LabelErrCielo, "");
+    }
 
     // Barre PID (senza animazioni)
-      // v24: barre con interpolazione fluida (animazione leggera).
-      // Cache dei valori → se invariato, skip set (riduce invalidate).
-      static int s_prev_v_base = -1, s_prev_v_cielo = -1;
-      {
-          int v = (int)s->pid_out_base;
-          if (v != s_prev_v_base) {
-              lv_bar_set_value(ui_BarPidBase, v, LV_ANIM_ON);
-              char buf[16]; snprintf(buf, sizeof(buf), "PID %d%%", v);
-              lv_label_set_text(ui_LabelPidBase, buf);
-              s_prev_v_base = v;
-          }
-      }
-      {
-          int v = (int)s->pid_out_cielo;
-          if (v != s_prev_v_cielo) {
-              lv_bar_set_value(ui_BarPidCielo, v, LV_ANIM_ON);
-              char buf[16]; snprintf(buf, sizeof(buf), "PID %d%%", v);
-              lv_label_set_text(ui_LabelPidCielo, buf);
-              s_prev_v_cielo = v;
-          }
-      }
+    {
+        int v = (int)s->pid_out_base;
+        lv_bar_set_value(ui_BarPidBase, v, LV_ANIM_OFF);
+        char buf[16]; snprintf(buf, sizeof(buf), "PID %d%%", v);
+        lv_label_set_text(ui_LabelPidBase, buf);
+    }
+    {
+        int v = (int)s->pid_out_cielo;
+        lv_bar_set_value(ui_BarPidCielo, v, LV_ANIM_OFF);
+        char buf[16]; snprintf(buf, sizeof(buf), "PID %d%%", v);
+        lv_label_set_text(ui_LabelPidCielo, buf);
+    }
 
     // LED relay — animazione doppio flash quando si accendono
     static bool s_prev_relay_base = false, s_prev_relay_cielo = false;
@@ -1748,11 +1682,11 @@ void ui_refresh_temp(AppState* s) {
     // In SINGLE mode: set_base segue sempre set_cielo
     if (is_single) s->set_base = s->set_cielo;
 
-    // v24: NO re-layout ciclico. Vedi commento in ui_refresh().
+    ui_apply_temp_sensor_layout(is_single);
 
-      // v24: arc animato proporzionale (40-150 ms).
-      if (ui_ArcBase)  anim_arc_set_value(ui_ArcBase,  (int16_t)s->set_base);
-      if (ui_ArcCielo) anim_arc_set_value(ui_ArcCielo, (int16_t)s->set_cielo);
+    // Archi setpoint (senza animazioni)
+    if (ui_ArcBase)  lv_arc_set_value(ui_ArcBase,  (int16_t)s->set_base);
+    if (ui_ArcCielo) lv_arc_set_value(ui_ArcCielo, (int16_t)s->set_cielo);
 
     char buf[20];
     snprintf(buf, sizeof(buf), "%.0f\xC2\xB0""C", s->set_base);
@@ -1761,12 +1695,8 @@ void ui_refresh_temp(AppState* s) {
     lv_label_set_text(ui_TempSetCielo, buf);
 
     // Barre PID CTRL (senza animazioni)
-      static int s_prev_vt_b = -1, s_prev_vt_c = -1;
-      int vtb = (int)s->pid_out_base, vtc = (int)s->pid_out_cielo;
-      if (vtb != s_prev_vt_b) { lv_bar_set_value(ui_TempBarBase, vtb,
-                                                 LV_ANIM_ON); s_prev_vt_b = vtb; }
-      if (vtc != s_prev_vt_c) { lv_bar_set_value(ui_TempBarCielo, vtc,
-                                                 LV_ANIM_ON); s_prev_vt_c = vtc; }
+    lv_bar_set_value(ui_TempBarBase,  (int)s->pid_out_base,  LV_ANIM_OFF);
+    lv_bar_set_value(ui_TempBarCielo, (int)s->pid_out_cielo, LV_ANIM_OFF);
 
     lv_label_set_text(ui_TempErrBase,  s->tc_base_err  ? "TC ERR" : "");
     lv_label_set_text(ui_TempErrCielo, s->tc_cielo_err ? "TC ERR" : "");
