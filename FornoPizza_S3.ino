@@ -77,9 +77,7 @@
 #ifndef RELAY_WINDOW_MS
 #define RELAY_WINDOW_MS  30000UL
 #endif
-#ifndef RELAY_MIN_DUTY_PCT
-#define RELAY_MIN_DUTY_PCT  5
-#endif
+// Limiti duty cycle relay sono definiti in hardware.h come RELAY_DUTY_MIN_PCT e RELAY_DUTY_MAX_PCT
 
 #if FEATURE_OTA && TASK_WIFI_ENABLE
   #include "ota_manager.h"
@@ -380,17 +378,14 @@ static void Task_PID(void* param) {
     if (g_state.base_enabled) {
       pid_base->compute();
       double duty_base = g_state.pid_out_base * (g_state.pct_base / 100.0);
-      if (duty_base < 0.0)   duty_base = 0.0;
-      if (duty_base > 100.0) duty_base = 100.0;
+      if (duty_base < RELAY_DUTY_MIN_PCT) duty_base = 0.0;
+      else if (duty_base > RELAY_DUTY_MAX_PCT) duty_base = 100.0;
 
       uint32_t window_ms = RELAY_WINDOW_MS;
       uint32_t on_time   = 0;
 
       if (duty_base > 0.0) {
         on_time = (uint32_t)(duty_base / 100.0 * (double)window_ms);
-        uint32_t min_on = (uint32_t)((RELAY_MIN_DUTY_PCT / 100.0) * (double)window_ms);
-        if (min_on == 0 && RELAY_MIN_DUTY_PCT > 0) min_on = 1;
-        if (on_time > 0 && on_time < min_on) on_time = min_on;
         if (on_time > window_ms) on_time = window_ms;
       }
 
@@ -405,17 +400,14 @@ static void Task_PID(void* param) {
     if (g_state.cielo_enabled) {
       pid_cielo->compute();
       double duty_cielo = g_state.pid_out_cielo * (g_state.pct_cielo / 100.0);
-      if (duty_cielo < 0.0)   duty_cielo = 0.0;
-      if (duty_cielo > 100.0) duty_cielo = 100.0;
+      if (duty_cielo < RELAY_DUTY_MIN_PCT) duty_cielo = 0.0;
+      else if (duty_cielo > RELAY_DUTY_MAX_PCT) duty_cielo = 100.0;
 
       uint32_t window_ms = RELAY_WINDOW_MS;
       uint32_t on_time   = 0;
 
       if (duty_cielo > 0.0) {
         on_time = (uint32_t)(duty_cielo / 100.0 * (double)window_ms);
-        uint32_t min_on = (uint32_t)((RELAY_MIN_DUTY_PCT / 100.0) * (double)window_ms);
-        if (min_on == 0 && RELAY_MIN_DUTY_PCT > 0) min_on = 1;
-        if (on_time > 0 && on_time < min_on) on_time = min_on;
         if (on_time > window_ms) on_time = window_ms;
       }
 

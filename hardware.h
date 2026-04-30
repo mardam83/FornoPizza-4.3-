@@ -145,8 +145,8 @@ extern SemaphoreHandle_t g_mutex;
 // ================================================================
 //  PARAMETRI RELAY PID
 // ================================================================
-#define RELAY_DUTY_MIN_PCT    5
-#define RELAY_DUTY_MAX_PCT   95
+#define RELAY_DUTY_MIN_PCT   10
+#define RELAY_DUTY_MAX_PCT   90
 #define PREHEAT_MARGIN_DEG   10.0f
 
 // ================================================================

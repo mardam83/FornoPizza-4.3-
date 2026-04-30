@@ -258,10 +258,10 @@ static inline void anim_preheat_bar(lv_obj_t* bar, int pct) {
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
     lv_bar_set_value(bar, pct, LV_ANIM_ON);
     lv_color_t col;
-    if      (pct < 40)  col = lv_color_make(0x50, 0x54, 0x60);
-    else if (pct < 70)  col = lv_color_make(0x88, 0x7C, 0x68);
-    else if (pct < 92)  col = lv_color_make(0xB0, 0x90, 0x58);
-    else                col = lv_color_make(0x78, 0x98, 0x80);
+    if      (pct < 40)  col = UI_COL_TEXT_DIM;
+    else if (pct < 70)  col = UI_COL_ACCENT2;
+    else if (pct < 92)  col = UI_COL_ACCENT;
+    else                col = UI_COL_GREEN;
     lv_obj_set_style_bg_color(bar, col, LV_PART_INDICATOR);
 }
 static inline void anim_preheat_bar_stop(lv_obj_t* bar) {
@@ -320,9 +320,9 @@ static inline void anim_toast_show(lv_obj_t* parent, const char* msg,
     lv_obj_t* panel = lv_obj_create(parent);
     lv_obj_set_size(panel, 320, 40);
     lv_obj_align(panel, LV_ALIGN_BOTTOM_MID, 0, -8);
-    lv_obj_set_style_bg_color(panel, lv_color_make(0x20,0x20,0x30), 0);
+    lv_obj_set_style_bg_color(panel, UI_COL_SURFACE_ALT, 0);
     lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(panel, lv_color_make(0x60,0x60,0x90), 0);
+    lv_obj_set_style_border_color(panel, UI_COL_BORDER, 0);
     lv_obj_set_style_border_width(panel, 1, 0);
     lv_obj_set_style_radius(panel, 8, 0);
     lv_obj_set_style_opa(panel, LV_OPA_TRANSP, 0);
@@ -347,7 +347,7 @@ static inline void anim_toast_show(lv_obj_t* parent, const char* msg,
 static inline void anim_timer_countdown_pulse(lv_obj_t* lbl) {
     if (!lbl) return;
     if (lv_anim_get(lbl, NULL)) return;
-    lv_obj_set_style_text_color(lbl, lv_color_make(0xFF, 0x30, 0x30), 0);
+    lv_obj_set_style_text_color(lbl, UI_COL_ERR, 0);
     lv_anim_t a; lv_anim_init(&a);
     lv_anim_set_var(&a, lbl);
     lv_anim_set_exec_cb(&a, [](void* obj, int32_t v){
@@ -363,7 +363,7 @@ static inline void anim_timer_countdown_stop(lv_obj_t* lbl) {
     if (!lbl) return;
     lv_anim_del(lbl, NULL);
     lv_obj_set_style_opa(lbl, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_color(lbl, lv_color_make(0x80, 0x80, 0xFF), 0);
+    lv_obj_set_style_text_color(lbl, UI_COL_TEXT_DIM, 0);
 }
 
 // ── 18. GRAPH INTRO ────────────────────────────────────────────

@@ -78,21 +78,23 @@ char          g_ota_status_msg[64]      = "Inserisci URL e premi AVVIA";
 // ================================================================
 //  COLORI LOCALI
 // ================================================================
-#define COL_WIFI    lv_color_make(0x00, 0x80, 0xFF)
-#define COL_OTA     lv_color_make(0xFF, 0x6B, 0x00)
-#define COL_OK      lv_color_make(0x00, 0xE6, 0x76)
-#define COL_ERR     lv_color_make(0xFF, 0x30, 0x30)
-#define COL_DARK    lv_color_make(0x10, 0x10, 0x1A)
-#define COL_DGRAY   lv_color_make(0x28, 0x28, 0x38)
-#define COL_GRAY    lv_color_make(0x60, 0x60, 0x70)
-#define COL_WHITE   lv_color_make(0xFF, 0xFF, 0xFF)
-#define COL_YELLOW  lv_color_make(0xFF, 0xE0, 0x00)
+#define COL_WIFI    UI_COL_CYAN
+#define COL_OTA     UI_COL_ACCENT
+#define COL_OK      UI_COL_GREEN
+#define COL_ERR     UI_COL_ERR
+#define COL_DARK    UI_COL_BG
+#define COL_DGRAY   UI_COL_SURFACE
+#define COL_GRAY    UI_COL_TEXT_DIM
+#define COL_WHITE   UI_COL_WHITE
+#define COL_YELLOW  UI_COL_YELLOW
 
 // ================================================================
 //  FORWARD DECLARATIONS
 // ================================================================
 static void cb_wifi_scan_btn(lv_event_t* e);
 static void cb_wifi_back_btn(lv_event_t* e);
+static void cb_wifi_list_up(lv_event_t* e);
+static void cb_wifi_list_dn(lv_event_t* e);
 static void cb_wifi_net_selected(lv_event_t* e);
 void        cb_wifi_pwd_kbd(lv_event_t* e);
 static void cb_ota_kbd(lv_event_t* e);
@@ -114,18 +116,17 @@ static lv_obj_t* make_action_btn(lv_obj_t* parent,
                                   lv_event_cb_t cb) {
     lv_obj_t* b = lv_btn_create(parent);
     lv_obj_set_pos(b, x, y); lv_obj_set_size(b, w, h);
-    lv_obj_set_style_bg_color(b, lv_color_make(0x1C,0x1C,0x2C), 0);
+    lv_obj_set_style_bg_color(b, lv_color_make(0x0A,0x0A,0x14), 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(b, border_col, 0);
     lv_obj_set_style_border_width(b, 2, 0);
     lv_obj_set_style_radius(b, 8, 0);
     lv_obj_set_style_shadow_width(b, 0, 0);
-    //lv_obj_set_style_transition_duration(b, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t* l = lv_label_create(b);
     lv_label_set_text(l, label);
     lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(l, border_col, 0);
+    lv_obj_set_style_text_color(l, UI_COL_WHITE, 0);
     lv_obj_center(l);
     return b;
 }
@@ -163,8 +164,7 @@ void ui_build_wifi(void) {
 
     lv_obj_t* hdr = lv_obj_create(ui_ScreenWifi);
     lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, 32);
-    lv_obj_set_style_bg_color(hdr, COL_WIFI, 0);
-    lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(hdr, 0, 0);
     lv_obj_set_style_radius(hdr, 0, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
@@ -178,29 +178,32 @@ void ui_build_wifi(void) {
     lv_obj_t* btn_mqtt = lv_btn_create(hdr);
     lv_obj_set_pos(btn_mqtt, 380, 2);
     lv_obj_set_size(btn_mqtt, 90, 28);
-    lv_obj_set_style_bg_color(btn_mqtt, lv_color_make(0x00, 0x50, 0x28), 0);
+    lv_obj_set_style_bg_color(btn_mqtt, lv_color_make(0x0A,0x0A,0x14), 0);
     lv_obj_set_style_border_color(btn_mqtt, COL_OK, 0);
     lv_obj_set_style_border_width(btn_mqtt, 2, 0);
-    lv_obj_set_style_radius(btn_mqtt, 6, 0);
+    lv_obj_set_style_radius(btn_mqtt, 8, 0);
     lv_obj_set_style_shadow_width(btn_mqtt, 0, 0);
-    //lv_obj_set_style_transition_duration(btn_mqtt, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(btn_mqtt, cb_goto_mqtt, LV_EVENT_CLICKED, NULL);
     ui_MqttBtnLbl = lv_label_create(btn_mqtt);
     lv_label_set_text(ui_MqttBtnLbl, "MQTT");
     lv_obj_set_style_text_font(ui_MqttBtnLbl, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(ui_MqttBtnLbl, lv_color_white(), 0);
+    lv_obj_set_style_text_color(ui_MqttBtnLbl, UI_COL_WHITE, 0);
     lv_obj_center(ui_MqttBtnLbl);
 
     ui_WifiList = lv_obj_create(ui_ScreenWifi);
-    lv_obj_set_pos(ui_WifiList, 0, 32); lv_obj_set_size(ui_WifiList, 480, 166);
-    lv_obj_set_style_bg_color(ui_WifiList, COL_DARK, 0);
+    lv_obj_set_pos(ui_WifiList, 4, 36); lv_obj_set_size(ui_WifiList, 428, 158);
+    lv_obj_set_style_bg_color(ui_WifiList, lv_color_make(0x0E,0x0E,0x1E), 0);
     lv_obj_set_style_bg_opa(ui_WifiList, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(ui_WifiList, 0, 0);
-    lv_obj_set_style_pad_all(ui_WifiList, 0, 0);
-    lv_obj_set_style_radius(ui_WifiList, 0, 0);
+    lv_obj_set_style_border_color(ui_WifiList, COL_WIFI, 0);
+    lv_obj_set_style_border_width(ui_WifiList, 2, 0);
+    lv_obj_set_style_radius(ui_WifiList, 8, 0);
+    lv_obj_set_style_pad_all(ui_WifiList, 4, 0);
     lv_obj_add_flag(ui_WifiList, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(ui_WifiList, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scrollbar_mode(ui_WifiList, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(ui_WifiList, LV_DIR_VER);
+
+    lv_obj_t* btn_up = make_action_btn(ui_ScreenWifi, 436, 36, 40, 77, LV_SYMBOL_UP, COL_WIFI, cb_wifi_list_up);
+    lv_obj_t* btn_dn = make_action_btn(ui_ScreenWifi, 436, 117, 40, 77, LV_SYMBOL_DOWN, COL_WIFI, cb_wifi_list_dn);
 
     s_wifi_status_lbl_list = lv_label_create(ui_WifiList);
     lv_label_set_text(s_wifi_status_lbl_list, "Premi AGGIORNA per cercare reti");
@@ -211,10 +214,10 @@ void ui_build_wifi(void) {
     for (int i = 0; i < WIFI_SCAN_MAX; i++) {
         lv_obj_t* b = lv_btn_create(ui_WifiList);
         lv_obj_set_pos(b, 2, 2 + i * 26);
-        lv_obj_set_size(b, 476, 24);
-        lv_obj_set_style_bg_color(b, lv_color_make(0x1C,0x1C,0x2C), 0);
+        lv_obj_set_size(b, 412, 24);
+        lv_obj_set_style_bg_color(b, UI_COL_SURFACE_ALT, 0);
         lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_color(b, lv_color_make(0x30,0x30,0x50), 0);
+        lv_obj_set_style_border_color(b, UI_COL_BORDER, 0);
         lv_obj_set_style_border_width(b, 1, 0);
         lv_obj_set_style_radius(b, 4, 0);
         lv_obj_set_style_shadow_width(b, 0, 0);
@@ -223,7 +226,7 @@ void ui_build_wifi(void) {
         lv_obj_t* lbl = lv_label_create(b);
         lv_label_set_text(lbl, "");
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_make(0xFF,0xFF,0xFF), 0);
+        lv_obj_set_style_text_color(lbl, UI_COL_WHITE, 0);
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 2, 0);
         lv_obj_set_user_data(b, (void*)(uintptr_t)i);
         lv_obj_add_event_cb(b, cb_wifi_net_selected, LV_EVENT_RELEASED, NULL);
@@ -269,8 +272,7 @@ void ui_build_wifi_pwd(void) {
     // Header y=0..31
     lv_obj_t* hdr = lv_obj_create(ui_ScreenWifiPwd);
     lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, 32);
-    lv_obj_set_style_bg_color(hdr, COL_WIFI, 0);
-    lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(hdr, 0, 0);
     lv_obj_set_style_radius(hdr, 0, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
@@ -309,7 +311,7 @@ void ui_build_wifi_pwd(void) {
     lv_obj_align(ui_WifiKbd, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_keyboard_set_mode(ui_WifiKbd, LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_keyboard_set_textarea(ui_WifiKbd, ui_WifiPwdTA);
-    lv_obj_set_style_bg_color(ui_WifiKbd, lv_color_make(0x1A,0x1A,0x2A), 0);
+    lv_obj_set_style_bg_color(ui_WifiKbd, UI_COL_SURFACE_ALT, 0);
     lv_obj_set_style_bg_opa(ui_WifiKbd, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(ui_WifiKbd, COL_WHITE, 0);
     lv_obj_add_event_cb(ui_WifiKbd, cb_wifi_pwd_kbd, LV_EVENT_READY, NULL);
@@ -356,8 +358,7 @@ void ui_build_ota(void) {
 
     lv_obj_t* hdr = lv_obj_create(ui_ScreenOta);
     lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, 32);
-    lv_obj_set_style_bg_color(hdr, COL_OTA, 0);
-    lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(hdr, 0, 0);
     lv_obj_set_style_radius(hdr, 0, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
@@ -424,7 +425,7 @@ void ui_build_ota(void) {
     lv_obj_align(ui_OtaKbd, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_keyboard_set_mode(ui_OtaKbd, LV_KEYBOARD_MODE_SPECIAL);
     lv_keyboard_set_textarea(ui_OtaKbd, ui_OtaUrlTA);
-    lv_obj_set_style_bg_color(ui_OtaKbd, lv_color_make(0x1A,0x1A,0x2A), 0);
+    lv_obj_set_style_bg_color(ui_OtaKbd, UI_COL_SURFACE_ALT, 0);
     lv_obj_set_style_bg_opa(ui_OtaKbd, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(ui_OtaKbd, COL_WHITE, 0);
     lv_obj_add_event_cb(ui_OtaKbd, cb_ota_kbd, LV_EVENT_VALUE_CHANGED, NULL);
@@ -486,20 +487,21 @@ static void cb_mqtt_ta_focused(lv_event_t* e) {
 }
 
 void ui_build_mqtt(void) {
-    lv_color_t COL_MQTT = lv_color_make(0x00, 0x99, 0x55);
+    lv_color_t COL_MQTT = UI_COL_GREEN;
     // 480×272: riserva esplicita in basso per la tastiera (evita overlap con i campi)
     const int DISP_H = 272;
     const int HDR_H  = 32;
     const int KBD_H  = 120;
     const int FORM_H = DISP_H - HDR_H - KBD_H;
 
-    const int GAP = 8;
+    const int GAP = 12;
     const int W_PORT = 100;
     const int INNER_W = 480 - 8;   // pad orizzontale 4+4 sul form
     const int W_HOST = INNER_W - GAP - W_PORT;
-    const int LABEL_H = 11;
-    const int TA_H = 26;
-    const int ROW_GAP = 6;
+    const int TA_H = 32;
+    const int LABEL_TO_TA_GAP = 2;
+    const int ROW0_LABEL_Y = 6;
+    const int ROW1_LABEL_Y = 62;
     const int W_HALF = (INNER_W - GAP) / 2;
 
     ui_ScreenMqtt = lv_obj_create(NULL);
@@ -509,8 +511,7 @@ void ui_build_mqtt(void) {
 
     lv_obj_t* hdr = lv_obj_create(ui_ScreenMqtt);
     lv_obj_set_pos(hdr, 0, 0); lv_obj_set_size(hdr, 480, HDR_H);
-    lv_obj_set_style_bg_color(hdr, COL_MQTT, 0);
-    lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(hdr, 0, 0);
     lv_obj_set_style_radius(hdr, 0, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
@@ -538,45 +539,46 @@ void ui_build_mqtt(void) {
     lv_obj_set_scrollbar_mode(s_mqtt_form, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_scroll_dir(s_mqtt_form, LV_DIR_VER);
 
-    auto add_cell = [&](int x, int y, const char* label_txt, lv_obj_t** ta_out,
+    auto add_cell = [&](int x, int label_y, const char* label_txt, lv_obj_t** ta_out,
                         int max_len, bool password, int cell_w) {
         lv_obj_t* lbl = lv_label_create(s_mqtt_form);
         lv_label_set_text(lbl, label_txt);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(lbl, COL_GRAY, 0);
-        lv_obj_set_pos(lbl, x, y);
+        lv_obj_set_pos(lbl, x, label_y);
+
         lv_obj_t* ta = lv_textarea_create(s_mqtt_form);
-        lv_obj_set_pos(ta, x, y + LABEL_H + 2);
+        lv_obj_set_pos(ta, x, label_y + lv_font_get_line_height(&lv_font_montserrat_12) + LABEL_TO_TA_GAP);
         lv_obj_set_size(ta, cell_w, TA_H);
         lv_textarea_set_max_length(ta, max_len);
         lv_textarea_set_one_line(ta, true);
         lv_textarea_set_password_mode(ta, password);
         lv_obj_set_style_bg_color(ta, COL_DGRAY, 0);
-        lv_obj_set_style_text_font(ta, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(ta, COL_WHITE, 0);
         lv_obj_set_style_border_color(ta, COL_MQTT, 0);
         lv_obj_set_style_border_width(ta, 2, 0);
+        lv_obj_set_style_pad_ver(ta, 2, 0);
+        lv_obj_set_style_pad_hor(ta, 6, 0);
         lv_obj_add_event_cb(ta, cb_mqtt_ta_focused, LV_EVENT_FOCUSED, NULL);
         *ta_out = ta;
     };
 
     int x1 = 0;
     int x2 = W_HOST + GAP;
-    int y0 = 0;
-    add_cell(x1, y0, "Broker (IP o hostname)", &ui_MqttHostTA, 64, false, W_HOST);
-    add_cell(x2, y0, "Porta", &ui_MqttPortTA, 6, false, W_PORT);
+    add_cell(x1, ROW0_LABEL_Y, "Broker (IP o hostname)", &ui_MqttHostTA, 64, false, W_HOST);
+    add_cell(x2, ROW0_LABEL_Y, "Porta", &ui_MqttPortTA, 6, false, W_PORT);
     if (ui_MqttPortTA) lv_textarea_set_placeholder_text(ui_MqttPortTA, "1883");
 
-    int y1 = y0 + LABEL_H + 2 + TA_H + ROW_GAP;
-    add_cell(x1, y1, "Utente (opz.)", &ui_MqttUserTA, 32, false, W_HALF);
-    add_cell(x1 + W_HALF + GAP, y1, "Password", &ui_MqttPassTA, 32, true, W_HALF);
+    add_cell(x1, ROW1_LABEL_Y, "Utente (opz.)", &ui_MqttUserTA, 32, false, W_HALF);
+    add_cell(x1 + W_HALF + GAP, ROW1_LABEL_Y, "Password", &ui_MqttPassTA, 32, true, W_HALF);
 
     ui_MqttKbd = lv_keyboard_create(ui_ScreenMqtt);
     lv_obj_set_size(ui_MqttKbd, 480, KBD_H);
     lv_obj_align(ui_MqttKbd, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_keyboard_set_mode(ui_MqttKbd, LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_keyboard_set_textarea(ui_MqttKbd, ui_MqttHostTA);
-    lv_obj_set_style_bg_color(ui_MqttKbd, lv_color_make(0x1A,0x1A,0x2A), 0);
+    lv_obj_set_style_bg_color(ui_MqttKbd, UI_COL_SURFACE_ALT, 0);
     lv_obj_set_style_bg_opa(ui_MqttKbd, LV_OPA_COVER, 0);
     lv_obj_set_style_text_font(ui_MqttKbd, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ui_MqttKbd, COL_WHITE, 0);
@@ -709,6 +711,18 @@ static void cb_wifi_scan_btn(lv_event_t* e) {
 static void cb_wifi_back_btn(lv_event_t* e) {
     extern void ui_show_screen(Screen s);
     ui_show_screen(Screen::MAIN);
+}
+static void cb_wifi_list_up(lv_event_t* e) {
+    if (ui_WifiList) {
+        lv_coord_t y = lv_obj_get_scroll_y(ui_WifiList);
+        lv_obj_scroll_to_y(ui_WifiList, y - 52, LV_ANIM_ON);
+    }
+}
+static void cb_wifi_list_dn(lv_event_t* e) {
+    if (ui_WifiList) {
+        lv_coord_t y = lv_obj_get_scroll_y(ui_WifiList);
+        lv_obj_scroll_to_y(ui_WifiList, y + 52, LV_ANIM_ON);
+    }
 }
 static void cb_wifi_net_selected(lv_event_t* e) {
     if (s_net_selection_busy) return;

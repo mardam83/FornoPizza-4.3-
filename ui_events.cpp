@@ -14,7 +14,12 @@
 #include "simulator.h"
 #endif
 
-static void mark_dirty() { g_state.nvs_dirty = true; }
+static void mark_dirty() {
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    g_state.nvs_dirty = true;
+    MUTEX_GIVE();
+  }
+}
 
 static void refresh_active() {
   mark_dirty();
@@ -31,23 +36,37 @@ static void refresh_active() {
 //  CALLBACKS — setpoint
 // ================================================================
 void cb_base_minus(lv_event_t*) {
-  if (g_state.sensor_mode == SensorMode::SINGLE) return;
-  g_state.set_base = fmax(50.0, g_state.set_base - 5.0);
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    if (g_state.sensor_mode != SensorMode::SINGLE) {
+      g_state.set_base = fmax(50.0, g_state.set_base - 5.0);
+    }
+    MUTEX_GIVE();
+  }
   refresh_active();
 }
 void cb_base_plus(lv_event_t*) {
-  if (g_state.sensor_mode == SensorMode::SINGLE) return;
-  g_state.set_base = fmin(500.0, g_state.set_base + 5.0);
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    if (g_state.sensor_mode != SensorMode::SINGLE) {
+      g_state.set_base = fmin(500.0, g_state.set_base + 5.0);
+    }
+    MUTEX_GIVE();
+  }
   refresh_active();
 }
 void cb_cielo_minus(lv_event_t*) {
-  g_state.set_cielo = fmax(50.0, g_state.set_cielo - 5.0);
-  if (g_state.sensor_mode == SensorMode::SINGLE) g_state.set_base = g_state.set_cielo;
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    g_state.set_cielo = fmax(50.0, g_state.set_cielo - 5.0);
+    if (g_state.sensor_mode == SensorMode::SINGLE) g_state.set_base = g_state.set_cielo;
+    MUTEX_GIVE();
+  }
   refresh_active();
 }
 void cb_cielo_plus(lv_event_t*) {
-  g_state.set_cielo = fmin(500.0, g_state.set_cielo + 5.0);
-  if (g_state.sensor_mode == SensorMode::SINGLE) g_state.set_base = g_state.set_cielo;
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    g_state.set_cielo = fmin(500.0, g_state.set_cielo + 5.0);
+    if (g_state.sensor_mode == SensorMode::SINGLE) g_state.set_base = g_state.set_cielo;
+    MUTEX_GIVE();
+  }
   refresh_active();
 }
 
@@ -55,37 +74,46 @@ void cb_cielo_plus(lv_event_t*) {
 //  CALLBACKS — ON/OFF
 // ================================================================
 void cb_toggle_base(lv_event_t*) {
-  if (g_state.sensor_mode == SensorMode::SINGLE) {
-    bool ns = !g_state.base_enabled;
-    g_state.base_enabled = g_state.cielo_enabled = ns;
-  } else {
-    g_state.base_enabled = !g_state.base_enabled;
-  }
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    if (g_state.sensor_mode == SensorMode::SINGLE) {
+      bool ns = !g_state.base_enabled;
+      g_state.base_enabled = g_state.cielo_enabled = ns;
+    } else {
+      g_state.base_enabled = !g_state.base_enabled;
+    }
 #if SIMULATOR_MODE
-  if (!g_state.base_enabled && !g_state.cielo_enabled)
-    simulator_user_turned_heat_off();
+    if (!g_state.base_enabled && !g_state.cielo_enabled)
+      simulator_user_turned_heat_off();
 #endif
+    MUTEX_GIVE();
+  }
   ui_refresh(&g_state);
   ui_refresh_temp(&g_state);
   ui_timer_auto_start();
 }
 void cb_toggle_cielo(lv_event_t*) {
-  if (g_state.sensor_mode == SensorMode::SINGLE) {
-    bool ns = !g_state.cielo_enabled;
-    g_state.base_enabled = g_state.cielo_enabled = ns;
-  } else {
-    g_state.cielo_enabled = !g_state.cielo_enabled;
-  }
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    if (g_state.sensor_mode == SensorMode::SINGLE) {
+      bool ns = !g_state.cielo_enabled;
+      g_state.base_enabled = g_state.cielo_enabled = ns;
+    } else {
+      g_state.cielo_enabled = !g_state.cielo_enabled;
+    }
 #if SIMULATOR_MODE
-  if (!g_state.base_enabled && !g_state.cielo_enabled)
-    simulator_user_turned_heat_off();
+    if (!g_state.base_enabled && !g_state.cielo_enabled)
+      simulator_user_turned_heat_off();
 #endif
+    MUTEX_GIVE();
+  }
   ui_refresh(&g_state);
   ui_refresh_temp(&g_state);
   ui_timer_auto_start();
 }
 void cb_toggle_luce(lv_event_t*) {
-  g_state.luce_on = !g_state.luce_on;
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    g_state.luce_on = !g_state.luce_on;
+    MUTEX_GIVE();
+  }
   ui_refresh(&g_state); ui_refresh_temp(&g_state);
 }
 
@@ -93,21 +121,34 @@ void cb_toggle_luce(lv_event_t*) {
 //  CALLBACKS — mode/split
 // ================================================================
 void cb_toggle_mode(lv_event_t*) {
-  if (g_state.sensor_mode == SensorMode::SINGLE) {
-    g_state.sensor_mode = SensorMode::DUAL;
-  } else {
-    g_state.sensor_mode = SensorMode::SINGLE;
-    g_state.cielo_enabled = false;
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    if (g_state.sensor_mode == SensorMode::SINGLE) {
+      g_state.sensor_mode = SensorMode::DUAL;
+      g_state.pct_base = 100;
+      g_state.pct_cielo = 100;
+    } else {
+      g_state.sensor_mode = SensorMode::SINGLE;
+      g_state.cielo_enabled = false;
+    }
+    g_state.nvs_dirty = true;
+    MUTEX_GIVE();
   }
-  g_state.nvs_dirty = true;
   refresh_active();
 }
 
 void cb_mode_long_press(lv_event_t*) {
-  bool was_single = (g_state.sensor_mode == SensorMode::SINGLE);
-  g_state.sensor_mode = was_single ? SensorMode::DUAL : SensorMode::SINGLE;
-  if (g_state.sensor_mode == SensorMode::SINGLE) g_state.cielo_enabled = false;
-  g_state.nvs_dirty = true;
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    bool was_single = (g_state.sensor_mode == SensorMode::SINGLE);
+    g_state.sensor_mode = was_single ? SensorMode::DUAL : SensorMode::SINGLE;
+    if (g_state.sensor_mode == SensorMode::SINGLE) {
+        g_state.cielo_enabled = false;
+    } else {
+        g_state.pct_base = 100;
+        g_state.pct_cielo = 100;
+    }
+    g_state.nvs_dirty = true;
+    MUTEX_GIVE();
+  }
   refresh_active();
 }
 
@@ -148,13 +189,13 @@ void cb_goto_autotune(lv_event_t*)        { ui_show_screen(Screen::AUTOTUNE);  }
 // ================================================================
 static void set_preset(int minutes) {
   g_graph_minutes = minutes;
-  lv_color_t ca = lv_color_make(0x80,0xFF,0x40);
-  lv_color_t ci = lv_color_make(0x0C,0x1C,0x0C);
+  lv_color_t ca = UI_COL_GREEN;
+  lv_color_t ci = UI_COL_SURFACE;
   lv_obj_set_style_bg_color(ui_BtnPreset5,  minutes ==  5 ? ca : ci, 0);
   lv_obj_set_style_bg_color(ui_BtnPreset15, minutes == 15 ? ca : ci, 0);
   lv_obj_set_style_bg_color(ui_BtnPreset30, minutes == 30 ? ca : ci, 0);
-  lv_color_t ta = lv_color_black();
-  lv_color_t ti = lv_color_make(0x80,0xFF,0x40);
+  lv_color_t ta = UI_COL_BG;
+  lv_color_t ti = UI_COL_GREEN;
   lv_obj_t* btns[3] = {ui_BtnPreset5, ui_BtnPreset15, ui_BtnPreset30};
   int prs[3] = {5, 15, 30};
   for (int i = 0; i < 3; i++) {
@@ -172,21 +213,24 @@ void cb_preset_30(lv_event_t*) { set_preset(30); }
 // ================================================================
 //  CALLBACKS — PID tuning
 // ================================================================
-void cb_kp_base_m(lv_event_t*)  { g_state.kp_base  = fmax(0.0,  g_state.kp_base  - 0.1);   refresh_active(); }
-void cb_kp_base_p(lv_event_t*)  { g_state.kp_base  = fmin(20.0, g_state.kp_base  + 0.1);   refresh_active(); }
-void cb_ki_base_m(lv_event_t*)  { g_state.ki_base  = fmax(0.0,  g_state.ki_base  - 0.005); refresh_active(); }
-void cb_ki_base_p(lv_event_t*)  { g_state.ki_base  = fmin(1.0,  g_state.ki_base  + 0.005); refresh_active(); }
-void cb_kd_base_m(lv_event_t*)  { g_state.kd_base  = fmax(0.0,  g_state.kd_base  - 0.1);   refresh_active(); }
-void cb_kd_base_p(lv_event_t*)  { g_state.kd_base  = fmin(20.0, g_state.kd_base  + 0.1);   refresh_active(); }
-void cb_kp_cielo_m(lv_event_t*) { g_state.kp_cielo = fmax(0.0,  g_state.kp_cielo - 0.1);   refresh_active(); }
-void cb_kp_cielo_p(lv_event_t*) { g_state.kp_cielo = fmin(20.0, g_state.kp_cielo + 0.1);   refresh_active(); }
-void cb_ki_cielo_m(lv_event_t*) { g_state.ki_cielo = fmax(0.0,  g_state.ki_cielo - 0.005); refresh_active(); }
-void cb_ki_cielo_p(lv_event_t*) { g_state.ki_cielo = fmin(1.0,  g_state.ki_cielo + 0.005); refresh_active(); }
-void cb_kd_cielo_m(lv_event_t*) { g_state.kd_cielo = fmax(0.0,  g_state.kd_cielo - 0.1);   refresh_active(); }
-void cb_kd_cielo_p(lv_event_t*) { g_state.kd_cielo = fmin(20.0, g_state.kd_cielo + 0.1);   refresh_active(); }
+void cb_kp_base_m(lv_event_t*)  { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.kp_base  = fmax(0.0,  g_state.kp_base  - 0.1); MUTEX_GIVE(); }   refresh_active(); }
+void cb_kp_base_p(lv_event_t*)  { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.kp_base  = fmin(20.0, g_state.kp_base  + 0.1); MUTEX_GIVE(); }   refresh_active(); }
+void cb_ki_base_m(lv_event_t*)  { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.ki_base  = fmax(0.0,  g_state.ki_base  - 0.005); MUTEX_GIVE(); } refresh_active(); }
+void cb_ki_base_p(lv_event_t*)  { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.ki_base  = fmin(1.0,  g_state.ki_base  + 0.005); MUTEX_GIVE(); } refresh_active(); }
+void cb_kd_base_m(lv_event_t*)  { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.kd_base  = fmax(0.0,  g_state.kd_base  - 0.1); MUTEX_GIVE(); }   refresh_active(); }
+void cb_kd_base_p(lv_event_t*)  { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.kd_base  = fmin(20.0, g_state.kd_base  + 0.1); MUTEX_GIVE(); }   refresh_active(); }
+void cb_kp_cielo_m(lv_event_t*) { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.kp_cielo = fmax(0.0,  g_state.kp_cielo - 0.1); MUTEX_GIVE(); }   refresh_active(); }
+void cb_kp_cielo_p(lv_event_t*) { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.kp_cielo = fmin(20.0, g_state.kp_cielo + 0.1); MUTEX_GIVE(); }   refresh_active(); }
+void cb_ki_cielo_m(lv_event_t*) { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.ki_cielo = fmax(0.0,  g_state.ki_cielo - 0.005); MUTEX_GIVE(); } refresh_active(); }
+void cb_ki_cielo_p(lv_event_t*) { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.ki_cielo = fmin(1.0,  g_state.ki_cielo + 0.005); MUTEX_GIVE(); } refresh_active(); }
+void cb_kd_cielo_m(lv_event_t*) { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.kd_cielo = fmax(0.0,  g_state.kd_cielo - 0.1); MUTEX_GIVE(); }   refresh_active(); }
+void cb_kd_cielo_p(lv_event_t*) { if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) { g_state.kd_cielo = fmin(20.0, g_state.kd_cielo + 0.1); MUTEX_GIVE(); }   refresh_active(); }
 
 void cb_pid_save(lv_event_t*) {
-  g_state.nvs_dirty = true;
+  if (MUTEX_TAKE_MS(MUTEX_TIMEOUT_MS)) {
+    g_state.nvs_dirty = true;
+    MUTEX_GIVE();
+  }
   lv_obj_t* lbl = (g_state.active_screen == Screen::PID_CIELO)
                    ? ui_LblSaveStatusCielo : ui_LblSaveStatus;
   lv_label_set_text(lbl, LV_SYMBOL_OK " Salvato!");

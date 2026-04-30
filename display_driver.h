@@ -353,9 +353,9 @@ void display_init() {
                 (float)LCD_V_RES / DRAW_BUF_ROWS);
 
   s_dbuf1 = (lv_color_t*)heap_caps_malloc(
-                 dbuf_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                 dbuf_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
   s_dbuf2 = (lv_color_t*)heap_caps_malloc(
-                 dbuf_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                 dbuf_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
 
   if (!s_dbuf1 || !s_dbuf2) {
     // Fallback: un solo buffer più piccolo in SRAM se non c'è spazio.
@@ -368,6 +368,7 @@ void display_init() {
     lv_disp_draw_buf_init(&s_draw_buf, s_dbuf1, s_dbuf2, DRAW_BUF_PIXELS);
     Serial.printf("[DISP] Draw buffers OK  2 × %u px  SRAM interna\n",
                   (unsigned)DRAW_BUF_PIXELS);
+    Serial.println("[DISP] Flush path: blocking");
   }
 
   // ── 5. LVGL init ─────────────────────────────────────────────
